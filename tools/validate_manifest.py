@@ -33,6 +33,16 @@ KV = re.compile(r"^(\s*)([A-Za-z_][\w\-]*)\s*:\s*(.*)$")
 ITEM = re.compile(r"^(\s*)-\s*(.*)$")
 REQUIRED_TOP = ["name", "version", "orchestration", "stages"]
 
+
+def strip_comment(s):
+    """去掉行尾 YAML 注释。
+
+    YAML 里「空白 + #」才是注释起点（`a#b` 不是）。必须处理，否则
+    `- meta/cost-governor   # 说明` 会被当成整个字符串去拼路径，
+    报出「技能文件缺失」的假警报。实测踩过。
+    """
+    return re.split(r"\s+#", s, maxsplit=1)[0].strip()
+
 problems = []
 warnings = []
 
@@ -94,7 +104,7 @@ def parse(lines):
         prev_indent = indent
 
         # 进入块标量
-        if is_kv and KV.match(line).group(3).strip() in (">", "|", ">-", "|-", ">+", "|+"):
+        if is_kv and strip_comment(KV.match(line).group(3)) in (">", "|", ">-", "|-", ">+", "|+"):
             block_key_indent = indent
 
         stripped = line.strip()
@@ -115,20 +125,20 @@ def parse(lines):
                              "review_focus": [], "sub_stages": []}
                 stages.append(cur_stage)
                 cur_sub, sub_indent = None, None
-                body = ITEM.match(line).group(2).strip()
+                body = strip_comment(ITEM.match(line).group(2))
                 kv = KV.match(body)
                 if kv:
-                    cur_stage[kv.group(2)] = kv.group(3).strip().strip('"')
+                    cur_stage[kv.group(2)] = strip_comment(kv.group(3)).strip('"')
                 continue
             if cur_stage is None:
                 continue
 
             # 子阶段项（比阶段项深 4 的 `- name: xxx`）
             if is_item:
-                body = ITEM.match(line).group(2).strip()
+                body = strip_comment(ITEM.match(line).group(2))
                 parent = recent_key(lines, i, indent - 2)
                 if body.startswith("name:") and parent == "sub_stages":
-                    cur_sub = {"line": i, "name": body.split(":", 1)[1].strip(),
+                    cur_sub = {"line": i, "name": strip_comment(body.split(":", 1)[1]),
                                "checkpoint_required": None,
                                "human_approval_default": None,
                                "review_focus": []}
@@ -150,7 +160,7 @@ def parse(lines):
             m = KV.match(line)
             if not m:
                 continue
-            k, v = m.group(2), m.group(3).strip()
+            k, v = m.group(2), strip_comment(m.group(3))
             target = cur_sub if (cur_sub and sub_indent and indent > sub_indent) else cur_stage
             if k in ("checkpoint_required", "human_approval_default") and target is cur_sub:
                 cur_sub[k] = v
@@ -164,7 +174,7 @@ def parse(lines):
             continue
 
         if in_skills and indent == 2 and is_item:
-            skills.append(ITEM.match(line).group(2).strip())
+            skills.append(strip_comment(ITEM.match(line).group(2)))
     return top, stages, skills
 
 

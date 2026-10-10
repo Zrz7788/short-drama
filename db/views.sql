@@ -26,6 +26,11 @@ CREATE INDEX IF NOT EXISTS idx_imagegen_entity   ON image_generation(entity_id);
 CREATE INDEX IF NOT EXISTS idx_imagegen_status   ON image_generation(status);
 CREATE INDEX IF NOT EXISTS idx_shot_entity_ent   ON shot_entity(entity_id);
 CREATE INDEX IF NOT EXISTS idx_shot_continues    ON shot(continues_from);
+CREATE INDEX IF NOT EXISTS idx_checkpoint_ep     ON checkpoint(episode_id);
+CREATE INDEX IF NOT EXISTS idx_checkpoint_stage  ON checkpoint(episode_id, stage, substage);
+CREATE INDEX IF NOT EXISTS idx_checkpoint_status ON checkpoint(status);
+CREATE INDEX IF NOT EXISTS idx_decision_ep       ON decision_log(episode_id);
+CREATE INDEX IF NOT EXISTS idx_decision_cat      ON decision_log(category);
 
 -- ---------------------------------------------------------------- 视图
 DROP VIEW IF EXISTS v_episode_cost;
@@ -137,3 +142,55 @@ SELECT  e.id  AS episode_id,
            JOIN shot sh ON sh.id = g.shot_id
           WHERE sh.episode_id = e.id AND g.status = 'succeeded')           AS shots_with_video
 FROM episode e;
+
+-- 每集每阶段的门禁现状（取最大 revision）。用途：一眼看出卡在哪道门。
+DROP VIEW IF EXISTS v_stage_gate;
+CREATE VIEW v_stage_gate AS
+SELECT  e.id      AS episode_id,
+        e.seq     AS episode_seq,
+        c.stage,
+        c.substage,
+        c.status,
+        c.revision,
+        c.human_approved,
+        CASE WHEN c.human_approved = 1        THEN 'approved'
+             WHEN c.status = 'awaiting_human' THEN 'awaiting_human'
+             ELSE c.status END                AS gate_state,
+        c.started_at,
+        c.finished_at
+FROM episode e
+JOIN checkpoint c ON c.episode_id = e.id
+WHERE c.revision = (SELECT MAX(c2.revision) FROM checkpoint c2
+                     WHERE c2.episode_id = c.episode_id
+                       AND c2.stage = c.stage
+                       AND c2.substage = c.substage);
+
+-- 正在等人批的阶段。执行层每次开工先查它——有东西等人批就不该往下走。
+DROP VIEW IF EXISTS v_pending_approval;
+CREATE VIEW v_pending_approval AS
+SELECT  e.seq     AS episode_seq,
+        c.stage,
+        c.substage,
+        c.revision,
+        c.started_at,
+        c.metadata
+FROM checkpoint c
+JOIN episode e ON e.id = c.episode_id
+WHERE c.status = 'awaiting_human' AND c.human_approved = 0;
+
+-- 决策时间线：每次选择的备选、理由、置信度与出处。
+DROP VIEW IF EXISTS v_decision_trail;
+CREATE VIEW v_decision_trail AS
+SELECT  d.id,
+        e.seq        AS episode_seq,
+        d.stage,
+        d.category,
+        d.decision,
+        d.alternatives,
+        d.rationale,
+        d.confidence,
+        d.source,
+        d.created_at
+FROM decision_log d
+LEFT JOIN episode e ON e.id = d.episode_id
+ORDER BY d.created_at DESC, d.id DESC;

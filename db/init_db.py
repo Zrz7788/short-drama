@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -70,6 +70,9 @@ DOMAINS = {
     "生成任务": ["generation", "image_generation"],
     "成本":     ["cost_ledger", "price_book"],
     "实体":     ["entity", "entity_ref"],
+    # 声明式清单引入的两项：门禁存档与决策记录
+    "门禁存档": ["checkpoint"],
+    "决策记录": ["decision_log"],
 }
 
 

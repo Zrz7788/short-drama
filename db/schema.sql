@@ -264,3 +264,46 @@ CREATE TABLE IF NOT EXISTS price_book (
     updated_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE (model_id, variant, resolution, unit)
 );
+
+-- ---------------------------------------------------------------- 阶段存档与门禁状态
+-- 门禁协议的地基。没有这张表，"清单里的门禁开关"就只是文档。
+--
+-- 一个阶段可以有多条记录（revision 递增）：被取代的版本**保留不删**，
+-- 这样"门禁转移与阶段版本永不销毁"才是真的。查当前状态取 MAX(revision)。
+CREATE TABLE IF NOT EXISTS checkpoint (
+    id             INTEGER PRIMARY KEY,
+    episode_id     INTEGER NOT NULL REFERENCES episode(id) ON DELETE CASCADE,
+    stage          TEXT    NOT NULL,
+                   -- spec|script|cast|art|storyboard|prompts|keyframes|motion|continuity|assemble
+    substage       TEXT    NOT NULL DEFAULT '',
+                   -- portrait|turnaround|draft|direct|final；无子阶段时为空串
+    status         TEXT    NOT NULL,
+                   -- in_progress | awaiting_human | completed | failed
+    revision       INTEGER NOT NULL DEFAULT 1,
+    artifacts      TEXT,                            -- JSON：该阶段的产出工件
+    metadata       TEXT,                            -- JSON：审查发现、花费快照、耗时、partial_progress
+    human_approved INTEGER NOT NULL DEFAULT 0 CHECK (human_approved IN (0,1)),
+    approved_at    TEXT,
+    approved_note  TEXT,
+    started_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    finished_at    TEXT,
+    UNIQUE (episode_id, stage, substage, revision)
+);
+
+-- ---------------------------------------------------------------- 决策记录
+-- 清单里 decision_log 是一等工件，这张表就是它的落脚点。
+-- 用途：半年后回看"这个模型/这个档位当时为什么这么选"，答案在这里。
+CREATE TABLE IF NOT EXISTS decision_log (
+    id           INTEGER PRIMARY KEY,
+    episode_id   INTEGER REFERENCES episode(id) ON DELETE SET NULL,
+    stage        TEXT,
+    category     TEXT    NOT NULL,
+                 -- model_choice | entity_tier | approval_policy | budget
+                 -- | visual_accuracy_check | continuity | other
+    decision     TEXT    NOT NULL,                  -- 选了什么
+    alternatives TEXT,                              -- JSON 数组：当时还考虑了什么
+    rationale    TEXT,                              -- 为什么这么选
+    confidence   TEXT    NOT NULL DEFAULT 'medium', -- high | medium | low
+    source       TEXT,                              -- 依据出处（控制台/官方文档/反推/估算）
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
