@@ -94,9 +94,9 @@ CREATE TABLE IF NOT EXISTS image_generation (
     finished_at    TEXT
 );
 
--- ---------------------------------------------------------------- 实体参考图（定妆照 + 三视图 + 其他角度）
--- 对应流程的两个阶段：「生成定妆照」产出 view='portrait'，
--- 「生成三视图」产出 front / side / back。
+-- ---------------------------------------------------------------- 实体参考图（人物/场景/道具素材角度）
+-- 新素材体系（三视图已废弃）：人物产出 fullbody(全身照) / headshot(大头照)，
+-- 场景产出 scene_front / blocking / scene_top，道具产出 prop_ref。
 CREATE TABLE IF NOT EXISTS entity_ref (
     id           INTEGER PRIMARY KEY,
     entity_id    INTEGER NOT NULL REFERENCES entity(id) ON DELETE CASCADE,

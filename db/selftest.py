@@ -150,11 +150,14 @@ def main():
                 (pid, kind, name, "%s 的外观描述块" % name)).lastrowid
         check("实体数（人物2+布景1+道具1）", len(ents), 4)
 
-        # 每个实体先出定妆照；只有女主出全三视图
-        full_views = ["portrait", "front", "side", "back"]
+        # 新素材体系：人物出「全身照 + 大头照」，场景出「正视/站位/俯视」，道具出参考图
+        VIEWS = {"女主": ["fullbody", "headshot"],
+                 "男主": ["fullbody"],
+                 "客厅": ["scene_front", "blocking", "scene_top"]}
+        PRIMARY = {"fullbody", "scene_front", "prop_ref"}
         ref_images = 0
         for name, ent_id in ents.items():
-            for v in (full_views if name == "女主" else ["portrait"]):
+            for v in VIEWS.get(name, ["prop_ref"]):
                 gid = con.execute(
                     "INSERT INTO image_generation (entity_id, view, model_id, size,"
                     " status, cost) VALUES (?,?,?,?,'succeeded',?)",
@@ -169,9 +172,9 @@ def main():
                     "INSERT INTO entity_ref (entity_id, view, path, image_gen_id,"
                     " is_primary, approved) VALUES (?,?,?,?,?,1)",
                     (ent_id, v, "assets/refs/%s_%s.png" % (name, v), gid,
-                     1 if v == "portrait" else 0))
+                     1 if v in PRIMARY else 0))
                 ref_images += 1
-        check("参考图总数（4定妆 + 3三视图）", ref_images, 7)
+        check("参考图总数（人物3 + 场景3 + 道具1）", ref_images, 7)
 
         # 前 5 个镜头挂实体（女主为主体，客厅为背景）
         for sh in shot_ids[:5]:
@@ -193,15 +196,17 @@ def main():
             return dict(zip(cols, cur.fetchone()))
 
         r = view_row("v_entity_readiness", "name=?", "女主")
-        check("女主 refs 数", r["refs"], 4)
-        check("女主 三视图齐备(前+侧+后)",
-              r["has_front"] + r["has_side"] + r["has_back"], 3)
+        check("女主 refs 数（全身照+大头照）", r["refs"], 2)
+        check("女主 两种视角齐备",
+              r["has_fullbody"] + r["has_headshot"], 2)
         check("女主 有主参考图", r["has_primary"], 1)
         check("女主 被镜头引用数", r["used_in_shots"], 5)
 
         r = view_row("v_entity_readiness", "name=?", "客厅")
-        check("客厅 refs 数（只出了定妆照）", r["refs"], 1)
-        check("客厅 has_front（应为 0）", r["has_front"], 0)
+        check("客厅 refs 数（正视+站位+俯视）", r["refs"], 3)
+        check("客厅 场景三视角齐备",
+              r["has_scene_front"] + r["has_blocking"] + r["has_scene_top"], 3)
+        check("客厅 has_headshot（人物视角，应为 0）", r["has_headshot"], 0)
         check("客厅 被镜头引用数", r["used_in_shots"], 5)
 
         r = view_row("v_entity_readiness", "name=?", "照片")
