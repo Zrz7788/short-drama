@@ -101,8 +101,8 @@ CREATE TABLE IF NOT EXISTS entity_ref (
     id           INTEGER PRIMARY KEY,
     entity_id    INTEGER NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
     view         TEXT    NOT NULL,
-                 -- portrait(定妆照) | front/side/back(三视图)
-                 -- | three_quarter | wide | detail
+                 -- fullbody(全身照) | headshot(大头照)
+                 -- | scene_front | scene_top | blocking | prop_ref
     path         TEXT,
     image_gen_id INTEGER REFERENCES image_generation(id) ON DELETE SET NULL,
     seed         INTEGER,
