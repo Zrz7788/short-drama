@@ -46,7 +46,7 @@ data/                数据库文件与导出（*.db 不进 git）
 tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
   setup_ffmpeg.py    下载便携版 ffmpeg
-  validate_manifest.py  流水线清单校验（零依赖，查结构 + 契约）
+  validate_manifest.py  流水线清单校验（薄封装，解析器在 pipeline/manifest.py）
   install_skill.py   技能获取与安装（带质量门禁：硬性拒绝 + 提示）
   verify.py          全量验收（含全链路集成）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
@@ -436,12 +436,61 @@ python tools\validate_manifest.py
 门禁阶段有没有写 `review_focus`、`skill` 有没有登记、工件有没有重复产出、
 依赖的工件前面有没有人产出。当前结果：**结构 0 问题、契约 0 问题**。
 
-### ⚠️ 现状：清单是声明，执行层还没写
+## 执行层：让清单变成约束
 
-**读清单、按它卡门禁的执行层（checkpoint 读写 + 跳门禁报错）尚未实现。**
-在那之前这份清单是给人看的契约，不是机器强制的约束——而"靠自觉"的治理，
-在赶进度的时候一定会失守。各阶段脚本已有幂等跳过与成本记账，
-但没有统一的存档与门禁强制。
+上面「清单是声明、执行层还没写」那段曾经是真的。现在是假的了。
+
+| 文件 | 职责 |
+|---|---|
+| `pipeline/manifest.py` | 解析清单（自写的迷你 YAML，这台机器没有 PyYAML）+ 数据模型 |
+| `pipeline/checkpoint.py` | 存档、门禁、决策记录、续跑点的 API |
+| `pipeline/run.py` | 统一入口：状态、跑阶段、批准、一路跑到门禁 |
+
+### 一条命令跑一集
+
+```powershell
+python pipeline\run.py --episode-id 1                  # 现在走到哪、下一步是什么
+python pipeline\run.py --episode-id 1 --run script     # 跑一个阶段
+python pipeline\run.py --episode-id 1 --auto           # 一路跑到下一道人工门禁
+python pipeline\run.py --episode-id 1 --approve script --note "钩子够狠"
+python pipeline\run.py --pending                       # 有哪些在等人批
+python pipeline\run.py --episode-id 1 --run script --dry-run   # 只过门禁，不真跑
+```
+
+**门禁是真的。** 前面有人工门禁没批准，`--run` 直接报错**退出码 2**，
+不是打印一句提醒然后照跑：
+
+```
+跳门禁：要开始 script，但它前面的 spec 还没完成（当前状态：未开始）。
+  流水线必须按顺序走；先跑完 spec。
+```
+
+### 三条被代码强制的规矩
+
+1. **门禁逐道绑定。** 批准是逐阶段的；之前批过一次不覆盖后面的门——
+   由 `checkpoint.guard()` 执行
+2. **不许自己给自己盖章。** 带人工门禁的阶段，未获批准时 `finish()` 拒绝写成
+   `completed`。判据来自**清单的声明**，不是存档碰巧处于哪个状态
+3. **存档不销毁。** 重开阶段时 `revision` 递增，旧记录保留。
+   "门禁转移与阶段版本永不销毁"必须是真的，否则审计无从谈起
+
+### 续跑
+
+崩在中途不用从头来。`resume_point()` 区分四种中断原因：
+还没开始 / 中断 / 失败 / 卡在人工门禁。
+
+**进入阶段时先写一条 `in_progress`**——这既是续跑的依据，
+也是告诉看板"还活着，不是卡住了"。
+
+### 校验
+
+```powershell
+python tools\validate_manifest.py    # 只校验清单，不碰数据库
+python pipeline\selftest_run.py      # 执行层自检，34 项
+```
+
+解析器**只有一份**，在 `pipeline/manifest.py`；`validate_manifest.py` 是薄封装。
+（原来两处各写各的，必然分叉——第一版就因为不认折行和行尾注释误报了一堆假问题。）
 
 ## 数据库结构
 

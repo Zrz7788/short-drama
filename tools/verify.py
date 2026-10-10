@@ -59,7 +59,9 @@ PIPELINE_SCRIPTS = ["pipeline/common.py", "pipeline/llm.py", "pipeline/ark.py",
                     "pipeline/stage_refs.py", "pipeline/stage_firstframes.py",
                     "pipeline/stage_video.py",
                     "pipeline/selftest.py", "pipeline/selftest_llm.py",
-                    "pipeline/selftest_ark.py", "pipeline/selftest_e2e.py"]
+                    "pipeline/selftest_ark.py", "pipeline/selftest_e2e.py",
+                    "pipeline/manifest.py", "pipeline/checkpoint.py",
+                    "pipeline/run.py", "pipeline/selftest_run.py"]
 
 results = []
 
@@ -208,6 +210,7 @@ def check_pipeline():
     if not has_ff or missing:
         return
     run_child("tools/validate_manifest.py", "流水线清单校验（结构 + 契约）")
+    run_child("pipeline/selftest_run.py", "执行层自检（清单解析/门禁/存档/续跑/决策）", timeout=900)
     # 技术技能库：登记必须与磁盘一致。登记了却没有文件 = 谎报，
     # 有文件却没登记 = 不知道哪来的（无法判断过时没有）。
     prov_path = os.path.join(ROOT, "skills", "techniques", "_provenance.json")
