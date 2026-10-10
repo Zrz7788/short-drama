@@ -49,6 +49,7 @@ tools/              工具
   setup_ffmpeg.py    下载便携版 ffmpeg
   validate_manifest.py  流水线清单校验（薄封装，解析器在 pipeline/manifest.py）
   install_skill.py   技能获取与安装（带质量门禁：硬性拒绝 + 提示）
+  check_ark.py       Ark 配置检查（零成本：故意发错参数看错误码，区分密钥错与权限没开）
   verify.py          全量验收（含全链路集成）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
