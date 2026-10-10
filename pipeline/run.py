@@ -28,7 +28,7 @@ from pipeline import checkpoint as ck     # noqa: E402
 from pipeline import manifest as M        # noqa: E402
 
 # 子阶段名 → 脚本的额外参数。stage_refs 用 --phase，stage_video 用 --mode。
-PHASE_SUBSTAGES = {"portrait", "turnaround"}
+PHASE_SUBSTAGES = {"characters", "scenes", "props"}
 MODE_SUBSTAGES = {"draft", "direct", "final"}
 MARK = {"completed": "[完成]", "in_progress": "[进行]", "awaiting_human": "[等人批]",
         "failed": "[失败]", "未开始": "[  --  ]"}

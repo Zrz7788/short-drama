@@ -26,7 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline import ark as A  # noqa: E402
 from pipeline import common as C  # noqa: E402
 
-MAX_REFS = 4          # 参考图上限：主体 + 布景 + 道具足够了，多了反而互相干扰
+MAX_REFS = 5          # 参考图上限。官方推荐 4–5 个素材（能力上限是 30，但收多了干扰大）
+                      # 主体两张（面部特征 + 妆造）+ 布景 + 道具，正好 4–5
 
 
 def keyframe_path(ep, shot_seq, take=1):
@@ -38,31 +39,64 @@ def keyframe_path(ep, shot_seq, take=1):
 
 
 def shot_refs(con, shot_id):
-    """按主体→道具→布景的顺序取该镜实体的参考图（定妆照优先）。"""
+    """取该镜要传给模型的参考图（**按《拾音人》规范的素材纪律**）。
+
+    规则：
+
+    1. **面部大特写镜只给大头照一张。** `shot.solo_generation=1` 的镜头
+       （面部大特写、最大特效镜）**素材越少越稳**——这是规范里反复强调的。
+    2. **一般镜**：主体给两张——`headshot`（面部特征）+ `fullbody`（妆造），
+       提示词里分工引用（「面部特征参考图片1，妆造参考图片2」）。
+       只出过一张的（secondary 角色只有 fullbody）就只给一张。
+    3. 道具与布景各一张。
+    4. **总数不超过 5 张**（`max_refs`）。官方推荐 4–5 个素材，
+       能力上限是 30，但**收多了干扰大、出错率高**——超了按优先级截断，
+       并把截断情况报出来。
+    """
     order = {"subject": 0, "prop": 1, "background": 2}
+    solo = con.execute("SELECT COALESCE(solo_generation,0) FROM shot WHERE id=?",
+                       (shot_id,)).fetchone()
+    solo = bool(solo and solo[0])
+
     rows = con.execute(
-        "SELECT se.role, e.name, r.path, r.view, r.is_primary "
+        "SELECT se.role, e.name, e.kind, r.path, r.view, r.is_primary "
         "FROM shot_entity se JOIN entity e ON e.id = se.entity_id "
         "LEFT JOIN entity_ref r ON r.entity_id = e.id "
         "WHERE se.shot_id = ?", (shot_id,)).fetchall()
-    picked, seen = [], set()
-    # 每个实体只取一张：优先主参考图（定妆照），否则 front
-    best = {}
+
+    # 每个实体按需要的视角挑图
+    by_entity = {}
     for r in rows:
         if not r["path"]:
             continue
-        rank = (order.get(r["role"], 9), 0 if r["is_primary"] else 1)
-        if r["name"] not in best or rank < best[r["name"]][0]:
-            best[r["name"]] = (rank, r["path"], r["view"])
-    for name, (_rank, path, _view) in sorted(best.items(), key=lambda kv: kv[1][0]):
-        if path in seen:
-            continue
-        if os.path.exists(C.abs_path(path)):
-            picked.append(path)
-            seen.add(path)
+        by_entity.setdefault((r["role"], r["name"], r["kind"]), {})[r["view"]] = r["path"]
+
+    picked, seen = [], set()
+
+    def take(p):
+        if p and p not in seen and os.path.exists(C.abs_path(p)):
+            picked.append(p)
+            seen.add(p)
+            return True
+        return False
+
+    for (role, _name, kind), vs in sorted(
+            by_entity.items(), key=lambda kv: order.get(kv[0][0], 9)):
+        if kind == "character":
+            if solo:
+                # 面部大特写：只给大头照；没有大头照才退回主参考图
+                take(vs.get("headshot") or vs.get("fullbody"))
+            else:
+                # 面部特征 + 妆造，分工引用
+                take(vs.get("headshot"))
+                take(vs.get("fullbody"))
+        else:
+            # 道具 / 布景：一张即可（优先正视图）
+            take(vs.get("prop_ref") or vs.get("scene_front")
+                 or vs.get("blocking") or next(iter(vs.values()), None))
         if len(picked) >= MAX_REFS:
             break
-    return picked
+    return picked[:MAX_REFS]
 
 
 def image_unit_price(con, model_id):

@@ -27,7 +27,22 @@ PROMPT = os.path.join(C.ROOT, "pipeline", "prompts", "entities.md")
 
 KINDS = {"character", "location", "prop"}
 TIERS = {"main", "secondary", "background"}
-IMAGES_PER_TIER = {"main": 4, "secondary": 1, "background": 0}   # 定妆照 + 三视图
+IMAGES_PER_TIER = {"main": 4, "secondary": 1, "background": 0}   # 旧口径，仅作兜底
+
+# 新素材体系下的出图张数（依据 stage_refs 的 CHARACTER_VIEWS / SCENE_VIEWS）：
+#   人物  main=大头照+全身照=2   secondary=全身照=1
+#   场景  main=正视图+站位图+俯视图=3   secondary=正视图+站位图=2
+#   道具  main/secondary=1
+# 这里**不 import stage_refs**，因为本阶段（第 2 阶段）要能独立跑，
+# 而 stage_refs 会拉起 Ark 相关的依赖。数字变了要同步改两处。
+_IMG_BY_KIND = {"character": {"main": 2, "secondary": 1, "background": 0},
+                "location": {"main": 3, "secondary": 2, "background": 0},
+                "prop": {"main": 1, "secondary": 1, "background": 0}}
+
+
+def images_for(kind, tier):
+    """该实体预计出几张图。"""
+    return _IMG_BY_KIND.get(kind, {}).get(tier, IMAGES_PER_TIER.get(tier, 0))
 
 SPEC = {
     "entities": [{
@@ -93,7 +108,7 @@ def persist(con, ep, data, dry):
     for e in ents:
         by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
         by_tier[e["tier"]] = by_tier.get(e["tier"], 0) + 1
-    images = sum(IMAGES_PER_TIER[e["tier"]] for e in ents)
+    images = sum(images_for(e["kind"], e["tier"]) for e in ents)
     return by_kind, by_tier, images
 
 

@@ -70,7 +70,8 @@ def main():
     rep.add("orchestration 数字解析为数值",
             m.budget_default == 200.0 and m.hard_cap == 400.0,
             "预算 %s 硬顶 %s" % (m.budget_default, m.hard_cap))
-    rep.add("子阶段解析出来", len(m.stage("art").substages) == 2
+    # art 拆三个子阶段：人物素材 / 场景素材 / 道具素材（原先是 portrait + turnaround）
+    rep.add("子阶段解析出来", len(m.stage("art").substages) == 3
             and len(m.stage("motion").substages) == 3,
             "art=%s motion=%s"
             % ([s.name for s in m.stage("art").substages],
@@ -119,12 +120,12 @@ stages:
     print("\n=== 2. 运行单元展平 ===")
     units = m.run_units()
     keys = [u.key for u in units]
-    rep.add("运行单元 13 个（10 阶段 + art 拆 2 + motion 拆 3 − 2 个父阶段）",
-            len(units) == 13, "%d 个" % len(units))
+    rep.add("运行单元 14 个（10 阶段 + art 拆 3 + motion 拆 3 − 2 个父阶段）",
+            len(units) == 14, "%d 个" % len(units))
     rep.add("art 与 motion 的父阶段不作为单元",
             "art" not in keys and "motion" not in keys)
     rep.add("单元顺序正确",
-            keys[:4] == ["spec", "script", "cast", "art/portrait"],
+            keys[:4] == ["spec", "script", "cast", "art/characters"],
             " → ".join(keys[:4]))
 
     con, eid = fresh_db()

@@ -134,27 +134,38 @@ stages:
     checkpoint_required: true
     human_approval_default: true
     sub_stages:
-      - name: portrait
-        description: "定妆照。给 main + secondary 出，视角 portrait"
+      - name: characters
+        description: "人物素材。main 出大头照 + 全身照，secondary 只出全身照"
         tools_available: [stage_refs]
         human_approval_default: true
         review_focus:
-          - 定妆照是后续全部镜头的一致性锚点，五官/发型/服装必须清晰可辨
-          - 这张图会被 60-100 集反复引用，图省这点钱最亏
-      - name: turnaround
-        description: "三视图。只给 main 出 front/side/back"
-        condition: "portrait_approved"
+          - 大头照是面部锚点，会被几十集反复引用，图省这点钱最亏
+          - 大头照必须是**仅面部、无表情、无肩颈、无背景**
+          - 全身照的服装要写到部件级（内层/外层/下装/鞋/配饰）
+          - **不许出三视图或多视角**——官方明确会引发双胞胎问题
+      - name: scenes
+        description: "场景素材。正视图 + 站位图 + 俯视图（核心场景）"
+        condition: "characters_approved"
         tools_available: [stage_refs]
         human_approval_default: true
         review_focus:
-          - 三视图必须以定妆照为参考图生成（图生图），否则不是同一个人
-          - 三个角度之间的五官/服装不许漂
+          - 站位图的白膜人偶位置要与分镜一致，且**人偶不能出现在成片里**
+          - 俯视图只给需要走位调度的核心场景，一次性场景不必出
+          - 场景只用 2 个左右（远低于素材上限），换场景比换人物便宜
+      - name: props
+        description: "道具素材。孤立照片，纯白背景"
+        tools_available: [stage_refs]
+        human_approval_default: true
+        review_focus:
+          - 道具是物证类钩子的载体，材质与磨损要清楚（如"被攥出褶皱的化验单"）
     review_focus:
       - 审完必须**冻结**（entity_ref.approved=1 且 is_primary=1），此后禁止重出
       - 没有冻结就往下走，第 30 集崩脸是必然的
+      - 每段引用给模型的素材**不超过 4-5 个**；面部大特写镜只给大头照一张
     success_criteria:
-      - main 级实体有 portrait + front + side + back
-      - secondary 级实体有 portrait
+      - character 类 main 级实体有 headshot + fullbody
+      - character 类 secondary 级实体有 fullbody
+      - location 类实体有 scene_front（核心场景另有 blocking + scene_top）
       - background 级实体无图
       - 全部 entity_ref.approved = 1
 
