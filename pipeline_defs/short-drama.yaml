@@ -267,11 +267,16 @@ stages:
     checkpoint_required: false
     human_approval_default: false
     review_focus:
-      - 默认把相邻镜头串起来（后一镜首帧 = 前一镜尾帧）
-      - 真实短剧有硬切，需要断开时把该镜 continues_from 置空
+      - "**默认断开续接。** 短剧镜头之间大多是硬切，机位与角度都变了，
+        「后一镜从上一镜最后一帧开始」在物理上不成立"
+      - 连续性靠角色资产 + 具名锁 + 状态单调性承担，不靠上一镜的尾帧
+      - 一部 110 分钟 Seedance 长片全片禁用起始帧，理由是上一镜的最后一帧
+        「会拖带它自己的漂移」。详见 knowledge/02-模型与成本/Seedance提示词与连续性锁定.md
+      - 只在**真实延续**时串联（同机位、同动作、长镜头拆分）
     success_criteria:
       - 每个 shot 的 last_frame_path 非空且文件存在
-      - 相邻镜头满足：后一镜 first_frame_path == 前一镜 last_frame_path
+      - 默认无 continues_from；有值的镜头必须能说明是真实延续，而非习惯性串联
+      - 若串联，后一镜 first_frame_path == 前一镜 last_frame_path
 
   # ---------------------------------------------------------------- 10 成集
   - name: assemble
