@@ -1,13 +1,24 @@
 -- ============================================================================
---  仿真人短剧生产库 · SQLite schema
---  设计原则：
---    1. 一次 API 调用 = 一条 generation 记录（抽卡次数的唯一真源）
---    2. 成本走 cost_ledger 流水，单价走 price_book 参考表，两者分离
---    3. 只存文本与路径，媒体文件不入库
---  重建方式：python db/init_db.py
+--  仿真人短剧生产库 · 表结构（第一段）
+--
+--  执行顺序由 db/init_db.py 保证：
+--      1. 本文件       建表（全部 IF NOT EXISTS，纯加法）
+--      2. migrate()    对已存在的表补新列（ALTER TABLE，见 init_db.py）
+--      3. db/views.sql 建索引与视图（依赖迁移后的列，必须放最后）
+--
+--  ⚠️ 为什么必须分三段：CREATE TABLE IF NOT EXISTS 对**已存在**的表完全不动，
+--     所以给它加列不会被迁移。把索引/视图放在最后，才能引用到新加的列。
+--     实测踩过一次：shot 表加 scene_id 后，索引直接报 no such column。
+--
+--  重建：python db/init_db.py --rebuild
+--  增量：python db/init_db.py
 -- ============================================================================
 
-PRAGMA foreign_keys = ON;
+-- ---------------------------------------------------------------- 元信息
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 
 -- ---------------------------------------------------------------- 项目
 CREATE TABLE IF NOT EXISTS project (
@@ -50,10 +61,41 @@ CREATE TABLE IF NOT EXISTS episode (
     UNIQUE (project_id, seq)
 );
 
+-- ---------------------------------------------------------------- 剧本（一集多版本，is_current=1 为现行稿）
+CREATE TABLE IF NOT EXISTS script (
+    id         INTEGER PRIMARY KEY,
+    episode_id INTEGER NOT NULL REFERENCES episode(id) ON DELETE CASCADE,
+    version    INTEGER NOT NULL DEFAULT 1,
+    title      TEXT,
+    logline    TEXT,                              -- 本集一句话
+    content    TEXT,                              -- 完整剧本文本（markdown）
+    word_count INTEGER,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)),
+    notes      TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE (episode_id, version)
+);
+
+-- ---------------------------------------------------------------- 场（剧本的结构化拆解，分镜从场来）
+CREATE TABLE IF NOT EXISTS scene (
+    id          INTEGER PRIMARY KEY,
+    script_id   INTEGER NOT NULL REFERENCES script(id) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL,
+    slug        TEXT,                             -- 场景标题，如「内景 · 夜 · 客厅」
+    location    TEXT,
+    time_of_day TEXT,
+    action      TEXT,                             -- 动作描述
+    dialogue    TEXT,                             -- 对白
+    beat        TEXT,                             -- 节奏位置：钩子/建立/升级/高潮/扣子
+    duration_s  REAL,                             -- 预估时长
+    UNIQUE (script_id, seq)
+);
+
 -- ---------------------------------------------------------------- 镜头（分镜表）
 CREATE TABLE IF NOT EXISTS shot (
     id              INTEGER PRIMARY KEY,
     episode_id      INTEGER NOT NULL REFERENCES episode(id) ON DELETE CASCADE,
+    scene_id        INTEGER REFERENCES scene(id) ON DELETE SET NULL,
     seq             INTEGER NOT NULL,
     duration_s      REAL    NOT NULL DEFAULT 4,     -- 2.x 支持 4-15 秒
     shot_size       TEXT,                           -- 特写/近景/中景/全景
@@ -135,61 +177,3 @@ CREATE TABLE IF NOT EXISTS price_book (
     updated_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE (model_id, variant, resolution, unit)
 );
-
--- ---------------------------------------------------------------- 索引
-CREATE INDEX IF NOT EXISTS idx_character_project ON character(project_id);
-CREATE INDEX IF NOT EXISTS idx_episode_project   ON episode(project_id);
-CREATE INDEX IF NOT EXISTS idx_shot_episode      ON shot(episode_id);
-CREATE INDEX IF NOT EXISTS idx_shot_char         ON shot(char_id);
-CREATE INDEX IF NOT EXISTS idx_gen_shot          ON generation(shot_id);
-CREATE INDEX IF NOT EXISTS idx_gen_status        ON generation(status);
-CREATE INDEX IF NOT EXISTS idx_gen_task          ON generation(task_id);
-CREATE INDEX IF NOT EXISTS idx_asset_gen         ON asset(generation_id);
-CREATE INDEX IF NOT EXISTS idx_cost_episode      ON cost_ledger(episode_id);
-
--- ---------------------------------------------------------------- 视图
-DROP VIEW IF EXISTS v_episode_cost;
-CREATE VIEW v_episode_cost AS
-SELECT  e.id                                   AS episode_id,
-        p.name                                 AS project,
-        e.seq                                  AS episode_seq,
-        COUNT(DISTINCT s.id)                    AS shots,
-        COUNT(DISTINCT g.id)                    AS generations,
-        COALESCE(SUM(g.cost), 0)                AS video_cost,
-        COALESCE((SELECT SUM(c.amount) FROM cost_ledger c
-                   WHERE c.episode_id = e.id), 0) AS total_cost
-FROM episode e
-JOIN project p ON p.id = e.project_id
-LEFT JOIN shot s       ON s.episode_id = e.id
-LEFT JOIN generation g ON g.shot_id = s.id
-GROUP BY e.id;
-
-DROP VIEW IF EXISTS v_shot_progress;
-CREATE VIEW v_shot_progress AS
-SELECT  s.id            AS shot_id,
-        e.seq           AS episode_seq,
-        s.seq           AS shot_seq,
-        s.duration_s,
-        s.strategy,
-        s.draws_planned,
-        COUNT(g.id)                                     AS attempts,
-        SUM(CASE WHEN g.status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
-        COALESCE(SUM(g.cost), 0)                        AS cost,
-        s.status
-FROM shot s
-JOIN episode e ON e.id = s.episode_id
-LEFT JOIN generation g ON g.shot_id = s.id
-GROUP BY s.id;
-
-DROP VIEW IF EXISTS v_price_book;
-CREATE VIEW v_price_book AS
-SELECT  model_id                                  AS 模型ID,
-        COALESCE(variant, '-')                    AS 档位,
-        COALESCE(resolution, '-')                 AS 分辨率,
-        unit                                      AS 计费单位,
-        unit_price                                AS 单价,
-        currency                                  AS 币种,
-        confidence                                AS 置信度,
-        COALESCE(source, '-')                     AS 来源
-FROM price_book
-ORDER BY model_id, variant, resolution;
