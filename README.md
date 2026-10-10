@@ -19,22 +19,26 @@ db/                 数据库
 pipeline/           管线阶段脚本
   common.py           共用层：路径、数据库连接、ffmpeg 调用
   llm.py              LLM 共用层：OpenAI 兼容调用、JSON 抽取、结构校验
-  prompts/            提示词模板（script / entities / storyboard / shot_prompt）
+  ark.py              Ark 客户端：图片（同步）与视频（异步任务）
+  prompts/            提示词模板（script / entities / storyboard / shot_prompt
+                      / portrait / turnaround）
   stage_script.py     第 1 阶段：生成剧本（含版本管理）
   stage_entities.py   第 2 阶段：提取人物/场景/道具并分级
+  stage_refs.py       第 3/4 阶段：定妆照与三视图（--phase 区分）
   stage_storyboard.py 第 5 阶段：生成分镜（含按镜抽卡策略）
   stage_prompts.py    第 6 阶段：提示词定稿（确定性组装，不走 LLM）
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
   assemble.py         第 10 阶段：拼接成集、可选烧字幕
   selftest.py         管线端到端自检（合成素材 + 临时库）
   selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
+  selftest_ark.py     第 3/4 阶段自检（本地假 Ark 服务 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
 tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
   setup_ffmpeg.py    下载便携版 ffmpeg
-  verify.py          全量验收（31 项检查，含管线）
+  verify.py          全量验收（32 项检查，含管线）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
@@ -47,7 +51,7 @@ tools/              工具
 ```powershell
 $git = "$PWD\.tools\mingit\cmd\git.exe"
 
-# 全量验收：git + 安全 + 知识库 + 数据库 + 管线，共 31 项检查
+# 全量验收：git + 安全 + 知识库 + 数据库 + 管线，共 32 项检查
 python tools\verify.py
 
 # 建/校验数据库（含增量迁移）
@@ -172,8 +176,8 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | 0 定交付规格 | 手工填 `project` | 分辨率/时长 | — |
 | **1 生成剧本** | `python pipeline\stage_script.py --episode-id N --brief "…"` | `script`、`scene` | ✅ |
 | **2 提取实体+分级** | `python pipeline\stage_entities.py --episode-id N` | `entity` | ✅ |
-| 3 定妆照 | 待写 | `image_generation`、`entity_ref` | ⏳ 待密钥 |
-| 4 三视图 | 待写 | `entity_ref(front/side/back)` | ⏳ 待密钥 |
+| 3 定妆照 | `python pipeline\stage_refs.py --episode-id N --phase portrait` | `image_generation`、`entity_ref(portrait)` | ✅ |
+| 4 三视图 | `python pipeline\stage_refs.py --episode-id N --phase turnaround` | `entity_ref(front/side/back)` | ✅ |
 | **5 生成分镜** | `python pipeline\stage_storyboard.py --episode-id N` | `shot`、`shot_entity` | ✅ |
 | **6 提示词定稿** | `python pipeline\stage_prompts.py --episode-id N` | `shot.prompt`、`negative_prompt` | ✅ |
 | 7 首帧图 | 待写 | `shot.first_frame_path` | ⏳ 待密钥 |
@@ -217,6 +221,35 @@ python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
 | `background` | 不出图 | 路人、一次性道具 |
 
 脚本跑完会按 `price_book` 里的图片单价，直接报出"预计要出多少张、约多少钱"。
+
+### 第 3/4 阶段的要点
+
+两个阶段共用一个脚本（`stage_refs.py`），用 `--phase` 区分——它们的流程完全相同，
+只是「给谁出图」和「出哪些视角」不同：
+
+| phase | 对应阶段 | 给谁出 | 视角 |
+|---|---|---|---|
+| `portrait` | 第 3 阶段 | `main` + `secondary` | `portrait`（定妆照） |
+| `turnaround` | 第 4 阶段 | **只有 `main`** | `front` / `side` / `back` |
+
+分级在这里兑现成钱：`main` 出 4 张、`secondary` 出 1 张、`background` 出 0 张。
+
+**三视图以定妆照为参考图生成（图生图）**，这是刻意的：纯文生图无法保证三个角度
+是同一个实体。定妆照是锚点，三视图从锚点长出来。没有定妆照的实体会被跳过并提示。
+
+其他行为：
+
+- **幂等**：已存在的视角不重复出图，要重出加 `--force`
+- **记账**：每次调用写 `image_generation`，并按 `price_book` 的图片单价写 `cost_ledger`
+- **失败也留痕**：调用失败会写一条 `status='failed'` 的 `image_generation` 记录，
+  带上错误信息，而不是静默跳过
+- `--dry-run` 先算张数与金额，不花钱
+
+**Ark 客户端（`pipeline/ark.py`）的字段名不是猜的**：请求体与响应结构取自一个
+真实跑通的第三方实现。但**视频任务的响应结构没有对着真实服务验证过**（没有 key），
+所以解析一律防御式——取不到预期字段时把**原始响应落盘**到 `.tools/ark-debug/`
+并在报错里给出路径。第一次真实调用要么成功，要么直接告诉我们要改哪里，
+而不是抛一句无从下手的 `KeyError`。
 
 ### 第 5 阶段的要点：抽卡策略
 
@@ -368,7 +401,9 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
 | 第 1/2/5/6 阶段脚本 | ✅ 剧本、实体分级、分镜、提示词定稿，49 项自检通过 |
+| 第 3/4 阶段脚本 | ✅ 定妆照、三视图；Ark 客户端字段名取自真实实现，36 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
-| 全量验收 | ✅ `python tools\verify.py`，31 项 |
+| 全量验收 | ✅ `python tools\verify.py`，32 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
-| Ark API Key | ⏳ 待提供，之后可跑第 3/4/7/8 阶段的真实生成 |
+| Ark API Key | ⏳ 待提供，之后可跑第 7/8 阶段的真实生成 |
+| 第 7/8 阶段脚本 | ⏳ 待写（首帧图、视频生成） |

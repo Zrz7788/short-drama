@@ -48,15 +48,53 @@ schannel，会因凭证不可用而报 `SEC_E_NO_CREDENTIALS`，TLS 握手直接
 
 ## 图片模型
 
-| 模型 | ID |
-|---|---|
-| Seedream 4.0 | `doubao-seedream-4-0-250828` |
-| Seedream 3.0 | `doubao-seedream-3-0-t2i-250415` |
-| Seedream 5.0 pro | 已上线，**完整 ID 需在控制台确认，勿臆测后缀** |
+| 模型 | ID | 置信度 |
+|---|---|---|
+| Seedream 5.0 pro | `doubao-seedream-5-0-pro-260628` | 中（第三方实现配置，后缀规律与已核实的 Seedance 一致） |
+| Seedream 4.5 | `doubao-seedream-4-5-251128` | 中（同上） |
+| Seedream 4.0 | `doubao-seedream-4-0-250828` | 高（官方控制台模型页） |
+| Seedream 3.0 | `doubao-seedream-3-0-t2i-250415` | 中 |
 
-图片接口：`POST /api/v3/images/generations`。
+首次使用前**在控制台核一眼 ID**。
 
-## 调用流程（异步任务）
+### 图片接口是同步的（与视频不同）
+
+```
+POST /api/v3/images/generations
+```
+
+```json
+{
+  "model": "doubao-seedream-5-0-pro-260628",
+  "prompt": "...",
+  "response_format": "url",
+  "size": "2K",
+  "watermark": false,
+  "image": ["data:image/png;base64,..."]
+}
+```
+
+- **无任务轮询**，一次请求直接拿结果
+- `size`：`1K`/`2K`/`4K`，或 `宽x高`。合法域：总像素 ≥ 2560×1440 且 ≤ 4096×4096，宽高比 [1/16, 16]
+- `image`：图生图参考图，是 **data URL 数组**（不是 URL 字符串），最多 14 张
+- `response_format` 固定 `url`；`watermark: false` 关掉右下角水印
+
+响应：
+
+```json
+{"model": "...", "data": [{"url": "https://..."}]}
+```
+
+三个坑：
+
+1. **响应不保证回传 `model`** —— 取不到要回落到请求里的模型，否则无法追溯用的哪个模型
+2. `data[]` 里可能是 `b64_json` 而非 `url`，两种都要处理
+3. **用参考图出三视图时**，参考图必须传 data URL 数组，否则风格一致性会丢
+
+5.0 pro 在同一端点还支持**指令编辑**（基准图 + 编辑指令）。方舟**没有掩码局部重绘**，
+`mask` 类需求只能整图重绘。
+
+## 视频生成流程（异步任务）
 
 1. `POST /api/v3/contents/generations/tasks` 创建任务，拿回任务 ID
 2. `GET /api/v3/contents/generations/tasks/{id}` 轮询，间隔 5–10 秒，勿高频
