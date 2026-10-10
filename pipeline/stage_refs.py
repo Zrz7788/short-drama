@@ -109,6 +109,9 @@ PHASE_TIERS = {"characters": ("main", "secondary"),
                "scenes": ("main", "secondary"),
                "props": ("main", "secondary")}
 
+# 各阶段管哪一类实体（entity.kind）
+PHASE_KIND = {"characters": "character", "scenes": "location", "props": "prop"}
+
 
 def entity_block(e):
     body = (e["description"] or "").strip()
@@ -198,6 +201,10 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
         " amount, note) VALUES ('image',?,1,'image',?,?,?)",
         (res["model"], cost, cost, "%s %s" % (e["name"], view)))
     con.commit()
+    # 回传落盘路径：调用方要靠它更新 have，否则**同一轮里后面的视角
+    # 找不到刚生成的参考图**（实测踩过：大头照以全身照为参考，
+    # 但 have 是开工前拍的快照，于是所有大头照都被跳过，只出了一半的图）。
+    return rel
 
     detail = "%.0f KB" % (nbytes / 1024.0) if nbytes else rel
     if price is None:
@@ -236,9 +243,12 @@ def main():
     tiers = list(PHASE_TIERS[args.phase])
     if args.include_background:
         tiers.append("background")
-    q = ("SELECT * FROM entity WHERE project_id=? AND role IN (%s)"
+    # **必须按 kind 过滤**：三个阶段各管一类实体。
+    # 只按 role 过滤的话，--phase characters 会连场景和道具一起出图。
+    q = ("SELECT * FROM entity WHERE project_id=? AND kind=? AND role IN (%s)"
          % ",".join("?" * len(tiers)))
-    ents = [dict(r) for r in con.execute(q, [ep["project_id"]] + tiers)]
+    ents = [dict(r) for r in con.execute(
+        q, [ep["project_id"], PHASE_KIND[args.phase]] + tiers)]
     if args.only:
         ents = [e for e in ents if e["name"] == args.only]
     if not ents:
@@ -339,10 +349,14 @@ def main():
                 rep.info("跳过 %s 的大头照：没有全身照可作参考（先跑同一阶段，"
                          "全身照会先出）" % e["name"])
                 continue
-            ok &= do_one(con, cfg, ep, e, v,
+            got = do_one(con, cfg, ep, e, v,
                          build_view_prompt(e, vn, vd),
                          ref, args.size, args.dry_run, rep,
                          "%s·%s" % (e["name"], vn))
+            ok &= bool(got)
+            if got and not args.dry_run:
+                # 立刻登记，后面的视角才能把它当参考图（见 do_one 的说明）
+                have[(e["id"], v)] = got
 
     if not args.dry_run:
         n = con.execute(

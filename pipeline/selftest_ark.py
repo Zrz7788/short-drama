@@ -229,6 +229,30 @@ def main():
                     "VALUES (?,?,?,?,?)", (pid, kind, name, tier, desc))
     con.commit()
     con.close()
+    # 各阶段该出多少张，**从视图定义推导**，不硬编码——
+    # 素材体系一改（比如三视图换成大头照+全身照），这里自动跟着变。
+    from pipeline import stage_refs as S
+
+    def _views_of(kind, role):
+        if kind == "character":
+            return len(S.CHARACTER_VIEWS.get(role, []))
+        if kind == "location":
+            return len(S.SCENE_VIEWS.get(role, []))
+        if kind == "prop":
+            return 1 if role in ("main", "secondary") else 0
+        return 0
+
+    def _imgs(kind):
+        return sum(_views_of(k, r) for k, _n, r, _d in ENTITIES if k == kind)
+
+    def _prim(kind):
+        """有几张 is_primary（每个出过图的实体各一张）。"""
+        return sum(1 for k, _n, r, _d in ENTITIES
+                   if k == kind and _views_of(k, r) > 0)
+
+    want_char, want_char_prim = _imgs("character"), _prim("character")
+    want_scene, want_scene_prim = _imgs("location"), _prim("location")
+    want_prop = _imgs("prop")
     n_main = sum(1 for e in ENTITIES if e[2] == "main")
     n_sec = sum(1 for e in ENTITIES if e[2] == "secondary")
     n_bg = sum(1 for e in ENTITIES if e[2] == "background")
@@ -243,8 +267,8 @@ def main():
     if p.returncode:
         print("\n".join(p.stdout.strip().splitlines()[-14:]))
 
-    want_portrait = n_main + n_sec          # background 不出图
-    rep.add("请求数与预期一致（main+secondary）",
+    want_portrait = want_char          # 按视图定义推导；background 不出图
+    rep.add("请求数与预期一致（人物素材）",
             len(Handler.requests) == want_portrait,
             "%d 次（预期 %d，background 不出）" % (len(Handler.requests), want_portrait))
     if Handler.requests:
@@ -266,7 +290,8 @@ def main():
     n_ref = con.execute("SELECT COUNT(*) FROM entity_ref").fetchone()[0]
     rep.add("entity_ref 写入数", n_ref == want_portrait, "%d 张" % n_ref)
     prim = con.execute("SELECT COUNT(*) FROM entity_ref WHERE is_primary=1").fetchone()[0]
-    rep.add("定妆照标为主参考图", prim == want_portrait, "%d 张" % prim)
+    rep.add("人物各有一张主参考图", prim == want_char_prim,
+            "%d 张（预期 %d，每个出图实体一张）" % (prim, want_char_prim))
     n_gen = con.execute("SELECT COUNT(*) FROM image_generation WHERE status='succeeded'"
                         ).fetchone()[0]
     rep.add("image_generation 记录", n_gen == want_portrait, "%d 条" % n_gen)
@@ -293,27 +318,44 @@ def main():
     if p.returncode:
         print("\n".join(p.stdout.strip().splitlines()[-14:]))
 
-    want_turn = n_main * 3
-    rep.add("只给 main 出三视图（每人 3 个视角）",
+    want_turn = want_scene            # 按视图定义推导
+    rep.add("场景素材张数正确",
             len(Handler.requests) == want_turn,
             "%d 次（预期 %d）" % (len(Handler.requests), want_turn))
-    rep.add("三视图带了参考图（图生图）",
-            bool(Handler.requests) and all("image" in r["body"] for r in Handler.requests),
-            "首条 image 字段长度 %d" % len(Handler.requests[0]["body"].get("image", [""])[0])
-            if Handler.requests else "")
-    if Handler.requests:
-        img = Handler.requests[0]["body"].get("image") or [""]
+    # 正视图本来就是文生图（无参考）；派生视角（俯视图 / 站位图）才带参考图
+    _ref_reqs = [r for r in Handler.requests if "image" in r["body"]]
+    rep.add("派生视角带了参考图（图生图）",
+            bool(Handler.requests) and len(_ref_reqs) == len(Handler.requests) - 1,
+            "带参考图 %d / 共 %d 次" % (len(_ref_reqs), len(Handler.requests)))
+    if _ref_reqs:
+        img = _ref_reqs[0]["body"].get("image") or [""]
         rep.add("参考图是内联 data URL", img[0].startswith("data:image/"),
                 img[0][:34] + "…")
 
     con = C.connect(TEST_DB)
     views = dict(con.execute("SELECT view, COUNT(*) FROM entity_ref GROUP BY view").fetchall())
-    rep.add("视角分布正确",
-            views.get("characters") == want_portrait and views.get("front") == n_main
-            and views.get("side") == n_main and views.get("back") == n_main,
-            " ".join("%s=%d" % kv for kv in sorted(views.items())))
+    # 新体系：人物出 headshot+fullbody，场景出 scene_front/blocking/scene_top。
+    # **只统计已经跑过的阶段**（本测试只跑了 characters 与 scenes，
+    # props 阶段没跑，所以道具的 prop_ref 不该出现在预期里）。
+    _exp = {}
+    for _k, _n, _r, _d in ENTITIES:
+        if _k == "character":
+            _vs = S.CHARACTER_VIEWS.get(_r, [])
+        elif _k == "location":
+            _vs = S.SCENE_VIEWS.get(_r, [])
+        else:
+            continue          # 道具阶段本测试不跑
+        for _v, _vn, _vd in _vs:
+            _exp[_v] = _exp.get(_v, 0) + 1
+    rep.add("视角分布正确", views == _exp,
+            " ".join("%s=%d" % kv for kv in sorted(views.items()))
+            + ("　预期 " + " ".join("%s=%d" % kv for kv in sorted(_exp.items()))
+               if views != _exp else ""))
     prim = con.execute("SELECT COUNT(*) FROM entity_ref WHERE is_primary=1").fetchone()[0]
-    rep.add("三视图不抢占主参考图标记", prim == want_portrait, "is_primary 仍为 %d" % prim)
+    rep.add("场景素材不抢占人物主参考图标记",
+            prim == want_char_prim + want_scene_prim,
+            "is_primary=%d（人物 %d + 场景 %d）"
+            % (prim, want_char_prim, want_scene_prim))
     total_cost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger"
                              ).fetchone()[0]
     rep.add("累计成本", abs(total_cost - (want_portrait + want_turn) * 0.20) < 1e-6,
