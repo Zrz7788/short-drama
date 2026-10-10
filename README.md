@@ -32,7 +32,7 @@ data/                数据库文件与导出（*.db 不进 git）
 tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
   setup_ffmpeg.py    下载便携版 ffmpeg
-  verify.py          全量验收（30 项检查，含管线）
+  verify.py          全量验收（31 项检查，含管线）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
@@ -45,7 +45,7 @@ tools/              工具
 ```powershell
 $git = "$PWD\.tools\mingit\cmd\git.exe"
 
-# 全量验收：git + 安全 + 知识库 + 数据库 + 管线，共 30 项检查
+# 全量验收：git + 安全 + 知识库 + 数据库 + 管线，共 31 项检查
 python tools\verify.py
 
 # 建/校验数据库（含增量迁移）
@@ -320,7 +320,7 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
 | 第 1/2 阶段脚本 | ✅ 剧本生成（含版本管理）、实体提取与分级，32 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
-| 全量验收 | ✅ `python tools\verify.py`，32 项 |
+| 全量验收 | ✅ `python tools\verify.py`，31 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
 | Ark API Key | ⏳ 待提供，之后可跑第 3/4/7/8 阶段的真实生成 |
 | 第 5/6 阶段脚本 | ⏳ 待写（分镜、提示词定稿） |
