@@ -606,7 +606,7 @@ def main():
     print("\n=== 9. 401 应提示检查 key 与模型权限 ===")
     Handler.state["mode"] = "401"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
-                   "--force", "--only", "林薇"], base)
+                   "--force", "--only", "出租屋"], base)
     blob = p.stdout + p.stderr
     rep.add("退出码非 0", p.returncode != 0)
     rep.add("提示了鉴权与权限", "鉴权失败" in blob and "权限" in blob,
@@ -617,7 +617,7 @@ def main():
     print("\n=== 10. 响应结构不符预期时应给出可读错误 ===")
     Handler.state["mode"] = "bad_shape"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
-                   "--force", "--only", "林薇"], base)
+                   "--force", "--only", "出租屋"], base)
     blob = p.stdout + p.stderr
     rep.add("退出码非 0", p.returncode != 0)
     rep.add("报错说明没有 data 数组并给出落盘路径",
@@ -634,7 +634,7 @@ def main():
     Handler.state["n429"] = 0
     Handler.requests.clear()
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
-                   "--force", "--only", "林薇"], base)
+                   "--force", "--only", "出租屋"], base)
     rep.add("退出码 0（重试后成功）", p.returncode == 0, C.tail(p.stderr, 50))
     rep.add("确实发生了 ≥2 次请求（含被限流那次）",
             len(Handler.requests) >= 2, "%d 次" % len(Handler.requests))
