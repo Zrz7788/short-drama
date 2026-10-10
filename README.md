@@ -79,7 +79,36 @@ fatal: Could not read from remote repository.
 | `init` / `add` / `commit` / `log` / `status` | ✅ 正常 | ✅ 正常 |
 | `push` / `fetch` / `clone` / `ls-remote` | ❌ 信号管道失败 | ✅ 正常 |
 
-**本地版本控制完全可用**，只有同步到远程时需要批准一次提权。
+**本地版本控制完全可用**，只有同步到远程时需要更宽的权限。
+
+**三种处理方式**（按推荐度）：
+
+**1. 切换会话权限模式（推荐）**
+
+`dsh-sandbox-policy` 的 `mode` 可在运行时通过 GUI 的策略控件切换，切换会记入会话日志、
+跨重启保留，每个会话独立。预设对应关系（取自 base bundle 的 `cordis.patch.yml`）：
+
+| 预设 | 沙箱模式 | 审批 |
+|---|---|---|
+| `read-only` | 拒绝写入 | 每次询问 |
+| `workspace-write` | 只写工作区 | 每次询问 ← 当前 |
+| `danger-full-access` | 不隔离 | 不询问 |
+
+切到 `danger-full-access` 后 `push` 不再需要批准。
+
+> ⚠️ **代价是 agent 不再受限**：文件写入失去边界，命令执行不再询问。这是拿隔离换便利，
+> 请自行权衡。如果只想推代码，用完切回 `workspace-write` 更稳。
+
+**2. 启动时用环境变量**
+
+base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspace-write'`，
+`approval` 的 policy 也由同一个变量决定。即用 `DSH_PERMISSION_MODE=danger-full-access`
+启动 DSH 可达到同样效果。
+
+**3. 保持现状，每次 push 批准一次** —— 最安全，代价是点一下批准。
+
+**已实测**：提权到 `danger-full-access` 后，`git push -u` 与 `git clone` 全流程正常
+（远程收到 3 个提交、20 个文件，clone 回读一致）。
 
 ### 3. 调 API 不能用 curl / Invoke-WebRequest
 
@@ -159,7 +188,7 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 & $git push -u origin main
 ```
 
-第 3 步在受限沙箱下会报信号管道错误，**需要批准一次提权**（原因见「本机环境要点」§2）。
+第 3 步在受限沙箱下会报信号管道错误，需要更宽权限——见「本机环境要点」§2 的三种处理方式。
 后续每次 `push` 同理。
 
 ## 项目纪律
