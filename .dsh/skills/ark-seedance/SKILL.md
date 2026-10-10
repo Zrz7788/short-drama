@@ -48,14 +48,43 @@ schannel，会因凭证不可用而报 `SEC_E_NO_CREDENTIALS`，TLS 握手直接
 
 ## 图片模型
 
-| 模型 | ID | 置信度 |
-|---|---|---|
-| Seedream 5.0 pro | `doubao-seedream-5-0-pro-260628` | 中（第三方实现配置，后缀规律与已核实的 Seedance 一致） |
-| Seedream 4.5 | `doubao-seedream-4-5-251128` | 中（同上） |
-| Seedream 4.0 | `doubao-seedream-4-0-250828` | 高（官方控制台模型页） |
-| Seedream 3.0 | `doubao-seedream-3-0-t2i-250415` | 中 |
+> ⚠️ **模型可用性是按账号开通的，不是全局的。** 方舟的全局模型目录里有一堆模型，
+> 但你的账号只开通了其中一部分。**代码里写死一个 ID 是危险的**——它可能在目录里
+> 存在、在你账号上却没开通，而报错是：
+>
+> ```
+> 404 InvalidEndpointOrModel.NotFound
+> "The model or endpoint X does not exist **or you do not have access to it**"
+> ```
+>
+> 看着像"权限问题"，实际是"ID 没开通"。**先查再写**：
+>
+> ```powershell
+> python tools\probe_models.py      # 免费，不创建任何任务
+> ```
 
-首次使用前**在控制台核一眼 ID**。
+### 实测已开通（2026-10-10，本机账号）
+
+| 模型 | ID | 备注 |
+|---|---|---|
+| **Seedream 5.0 pro** | `doubao-seedream-5-0-pro-260628` | **当前默认**，最高质量，做一致性锚点 |
+| **Seedream 5.0 flash** | `doubao-seedream-5-0-flash-260915` | 最新（2026-09-15），**适合抽卡迭代**，便宜 |
+| Seedream 4.0（新构型） | `doubao-seedream-4-0-20260415` | 4.0 线的新构建 |
+
+### 未开通（**别直接用**）
+
+`doubao-seedream-4-0-250828`（曾被误标为"高置信度"）、
+`doubao-seedream-4-5-251128`、`doubao-seedream-5-0-260128`、
+`doubao-seedream-3-0-t2i-250415`
+
+> **教训**：`doubao-seedream-4-0-250828` 曾以"高（官方控制台模型页）"的置信度
+> 写进代码默认值——**目录里确实有它，但本账号没开通**，于是每次出图都 404。
+> 查证方式：`GET /models` 列全局目录 + 逐个探测（缺 prompt 的请求会 400 而不会成功），
+> 两者合起来才能区分"不存在"与"没开通"。
+
+### 覆盖默认值
+
+在 `.env` 里写 `ARK_IMAGE_MODEL=...` 即可覆盖代码默认值，不用改代码。
 
 ### 图片接口是同步的（与视频不同）
 

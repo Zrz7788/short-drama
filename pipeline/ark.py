@@ -34,9 +34,26 @@ import pipeline.common as C
 
 BASE_DEFAULT = "https://ark.cn-beijing.volces.com/api/v3"
 
-MODEL_IMAGE = "doubao-seedream-4-0-250828"
-MODEL_IMAGE_HIFI = "doubao-seedream-5-0-pro-260628"
-MODEL_IMAGE_MID = "doubao-seedream-4-5-251128"
+# ------------------------------------------------------------------ 模型 ID
+#
+# ⚠️ **模型可用性是按账号开通的，不是全局的。**
+# 用 `python tools\probe_models.py` 或 `GET /models` 查你自己账号实际能用哪些。
+#
+# 这段默认值踩过一次坑：原来的 MODEL_IMAGE 写的是 doubao-seedream-4-0-250828，
+# 它在方舟的**全局模型目录里存在**，但本账号**没开通**——于是每次调用都返回
+# 404 InvalidEndpointOrModel.NotFound，报错原文是
+# "does not exist **or you do not have access to it**"。
+# 看起来像"权限问题"，实际是"代码里写死了一个没开通的 ID"。
+#
+# 下面这几个是**实测已开通**的（2026-10-10 用 GET /models + 逐个探测确认）：
+MODEL_IMAGE = os.environ.get("ARK_IMAGE_MODEL") or "doubao-seedream-5-0-pro-260628"
+MODEL_IMAGE_HIFI = "doubao-seedream-5-0-pro-260628"      # 最高质量，做一致性锚点
+MODEL_IMAGE_FLASH = "doubao-seedream-5-0-flash-260915"   # 最新且便宜，适合抽卡迭代
+MODEL_IMAGE_40 = "doubao-seedream-4-0-20260415"          # 4.0 线的新构型，也是已开通的
+# 以下两个在**本账号未开通**，留作参考，别直接用：
+MODEL_IMAGE_4_0_OLD = "doubao-seedream-4-0-250828"       # 未开通
+MODEL_IMAGE_4_5 = "doubao-seedream-4-5-251128"           # 未开通
+
 MODEL_VIDEO_25 = "doubao-seedance-2-5-260628"
 MODEL_VIDEO_20 = "doubao-seedance-2-0-260128"
 
