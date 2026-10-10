@@ -182,7 +182,7 @@ def main():
     ap.add_argument("--episode-id", type=int)
     ap.add_argument("--db", default=C.DEFAULT_DB)
     ap.add_argument("--status", action="store_true", help="看进度（默认行为）")
-    ap.add_argument("--run", metavar="阶段", help="跑一个阶段，如 script 或 art/portrait")
+    ap.add_argument("--run", metavar="阶段", help="跑一个阶段，如 script 或 art/characters")
     ap.add_argument("--auto", action="store_true", help="一路跑到下一道人工门禁")
     ap.add_argument("--approve", metavar="阶段", help="批准一道门")
     ap.add_argument("--note", help="批准备注")

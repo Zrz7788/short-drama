@@ -17,7 +17,7 @@ name: short-drama
 version: "1.0"
 description: >
   竖屏仿真人短剧流水线（9:16，单集约 80 秒，整部 60-100 集）。
-  走火山方舟 Ark：Seedream 出定妆照/三视图/首帧图，Seedance 出视频。
+  走火山方舟 Ark：Seedream 出人物素材（大头照+全身照）、场景素材（正视/站位/俯视）与首帧图，Seedance 出视频。
   成本策略的核心是把「挑选」留在便宜的那一段——480P 样片多抽，1080P 只出一次。
 category: short-drama
 stability: beta

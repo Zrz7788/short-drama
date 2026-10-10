@@ -337,7 +337,7 @@ class Manifest:
     def run_units(self):
         """把流水线展平成一串**运行单元**，按执行顺序。
 
-        有子阶段的阶段（art 的 portrait/turnaround、motion 的 draft/direct/final）
+        有子阶段的阶段（art 的 characters/scenes/props、motion 的 draft/direct/final）
         本身不作为门禁单位——真正的门在子阶段上。父阶段只提供产出与职责说明。
         没有子阶段的阶段自己就是单元。
         """
@@ -361,7 +361,7 @@ class Manifest:
         """需要人工批准的所有**运行单元**。
 
         按运行单元而不是按阶段算——`art` 这种有子阶段的父阶段本身不是门，
-        真正的门在 `art/portrait` 和 `art/turnaround` 上。
+        真正的门在 `art/characters` / `art/scenes` / `art/props` 上。
         """
         return [u.key for u in self.run_units() if u.human_approval]
 
