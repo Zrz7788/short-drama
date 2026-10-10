@@ -36,7 +36,7 @@ SELECT * FROM v_pipeline_status WHERE episode_seq = ?;
 | 1 | 剧本 | `script-director` | ✅ |
 | 2 | 实体与分级 | `cast-director` | ✅ |
 | 3 | 定妆照 | `art-director` | ✅ |
-| 4 | 三视图 | `art-director` | ✅ |
+| 4 | 场景素材 | `art-director` | ✅ |
 | 5 | 分镜 | `storyboard-director` | ✅ |
 | 6 | 提示词定稿 | `prompt-director` | ❌ 自动 |
 | 7 | 首帧图 | `keyframe-director` | ✅ **最关键** |
@@ -71,7 +71,7 @@ SELECT video_cost, image_cost, total_cost FROM v_episode_cost WHERE episode_seq 
 | 现象 | 处置 |
 |---|---|
 | 提示词里实体描述没逐字出现 | **停下**。第 6 阶段的机械校验会报错，说明模板被改坏了 |
-| 某个 main 实体缺三视图 | 回 `art-director` 补，然后**重新冻结** |
+| 某个 main 实体缺人物或场景素材 | 回 `art-director` 补，然后**重新冻结** |
 | 分镜引用了不存在的实体名 | 回 `cast-director` 补实体，或回 `storyboard-director` 改名 |
 | 首帧图里角色不像定妆照 | 回 `keyframe-director` 重出，别去跑视频 |
 | 成片时长与素材之和对不上 | 回 `continuity-director` 查缺失镜头 |
@@ -89,7 +89,7 @@ SELECT video_cost, image_cost, total_cost FROM v_episode_cost WHERE episode_seq 
 
 - 每道人工门禁都真的停过（回合结束过）
 - `motion` 之前有明确的预算确认
-- 每个 main 实体在三视图产出后被冻结（`approved=1`）
+- 每个 main 实体在素材产出后被冻结（`approved=1`）
 - 每个镜头都有 `selected_generation_id`
 - 成片时长与素材之和偏差 ≤ 0.5 秒
 - `cost_ledger` 的合计与 `generation.cost` 的合计一致

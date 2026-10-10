@@ -25,7 +25,7 @@ pipeline/           管线阶段脚本
                       / portrait / turnaround）
   stage_script.py     第 1 阶段：生成剧本（含版本管理）
   stage_entities.py   第 2 阶段：提取人物/场景/道具并分级
-  stage_refs.py       第 3/4 阶段：定妆照与三视图（--phase 区分）
+  stage_refs.py       第 3/4 阶段：人物/场景/道具素材（--phase 区分）
   stage_storyboard.py 第 5 阶段：生成分镜（含按镜抽卡策略）
   stage_prompts.py    第 6 阶段：提示词定稿（确定性组装，不走 LLM）
   stage_firstframes.py 第 7 阶段：生成首帧图（关键帧）
@@ -188,8 +188,8 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | 0 定交付规格 | 手工填 `project` | 分辨率/时长 | — |
 | **1 生成剧本** | `python pipeline\stage_script.py --episode-id N --brief "…"` | `script`、`scene` | ✅ |
 | **2 提取实体+分级** | `python pipeline\stage_entities.py --episode-id N` | `entity` | ✅ |
-| 3 定妆照 | `python pipeline\stage_refs.py --episode-id N --phase portrait` | `image_generation`、`entity_ref(portrait)` | ✅ |
-| 4 三视图 | `python pipeline\stage_refs.py --episode-id N --phase turnaround` | `entity_ref(front/side/back)` | ✅ |
+| 3 人物素材 | `python pipeline\stage_refs.py --episode-id N --phase characters` | `image_generation`、`entity_ref(portrait)` | ✅ |
+| 4 场景素材 | `python pipeline\stage_refs.py --episode-id N --phase scenes` | `entity_ref(front/side/back)` | ✅ |
 | **5 生成分镜** | `python pipeline\stage_storyboard.py --episode-id N` | `shot`、`shot_entity` | ✅ |
 | **6 提示词定稿** | `python pipeline\stage_prompts.py --episode-id N` | `shot.prompt`、`negative_prompt` | ✅ |
 | 7 首帧图 | `python pipeline\stage_firstframes.py --episode-id N` | `shot.keyframe_path` | ✅ |
@@ -228,7 +228,7 @@ python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
 
 | tier | 出图 | 判据 |
 |---|---|---|
-| `main` | 定妆照 + 三视图（4 张） | 是否需要在多个镜头里保持长得一样 |
+| `main` | 人物：大头照+全身照（2 张）；场景：正视+站位+俯视（3 张） | 是否需要在多个镜头里保持长得一样 |
 | `secondary` | 只出定妆照（1 张） | |
 | `background` | 不出图 | 路人、一次性道具 |
 
@@ -246,8 +246,12 @@ python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
 
 分级在这里兑现成钱：`main` 出 4 张、`secondary` 出 1 张、`background` 出 0 张。
 
-**三视图以定妆照为参考图生成（图生图）**，这是刻意的：纯文生图无法保证三个角度
-是同一个实体。定妆照是锚点，三视图从锚点长出来。没有定妆照的实体会被跳过并提示。
+**派生视角以基底视角为参考图生成（图生图）**，这是刻意的：纯文生图无法保证
+是同一个实体。基底是锚点，派生从锚点长出来。顺序是「全身照 → 大头照」
+「正视图 → 俯视图/站位图」。
+
+⚠️ **不出三视图。** 官方明确：三视图/多视图当参考素材会让模型识别成多个不同
+主体，直接引发双胞胎问题。人物只要「大头照 + 全身照」两张。
 
 其他行为：
 
@@ -637,7 +641,7 @@ tarball 不在时会说明怎么获取。）
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
 | 第 1/2/5/6 阶段脚本 | ✅ 剧本、实体分级、分镜、提示词定稿，49 项自检通过 |
-| 第 3/4/7/8 阶段脚本 | ✅ 定妆照、三视图、首帧图、视频生成；Ark 字段名取自真实实现，76 项自检通过 |
+| 第 3/4/7/8 阶段脚本 | ✅ 人物/场景/道具素材、首帧图、视频生成；Ark 字段名取自真实实现，76 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
 | 全量验收 | ✅ `python tools\verify.py`，33 项 |
 | **十个阶段脚本** | ✅ **全部写完并通过自检** |

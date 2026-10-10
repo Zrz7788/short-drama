@@ -21,7 +21,7 @@
 ```
 定妆照 portrait
    ↓ 作为图生图输入
-三视图 front/side/back
+派生视角 fullbody→headshot
    ↓ 冻结（approved=1）
 首帧图 shot.keyframe_path
    ↓ 作为参考图
@@ -133,7 +133,7 @@ SELECT e.name, r.view, r.approved, r.is_primary FROM entity_ref r
 |---|---|---|
 | 首帧图里角色不像定妆照 | 参考图没传到，或传错了 | 回 `keyframes`，**别去跑视频** |
 | 同一角色在不同镜头差异明显 | 提示词里描述块不一致 | 查上面的自查 SQL，回 `prompts` 重跑 |
-| 三视图之间漂了 | 没有以定妆照为参考图生成 | 回 `art` 的 `turnaround` 子阶段 |
+| 派生视角之间漂了 | 没有以基底图为参考图生成 | 回 `art` 的 `scenes`/`characters` 子阶段 |
 | 某一集整体看着不对 | 定妆照被重出过 | 查 `entity_ref.created_at`，回滚 |
 | 两人同框出现融合脸 | 缺负面词 | 回 `prompts`，确认 `人物融合` 在负面词里 |
 
@@ -142,7 +142,7 @@ SELECT e.name, r.view, r.approved, r.is_primary FROM entity_ref r
 
 ## 常见陷阱
 
-- **跳过三视图。** "定妆照看着够了"——侧脸、背面一旦出现就崩
+- **跳过场景素材。** 只有一张正面图，换个角度就是重新想象一个空间
 - **改完实体描述不重跑第 6 阶段。** 提示词里还是旧描述，链就断了
 - **审完不冻结。** 后面任何人都能重出，一致性没有保障
 - **在视频阶段修一致性。** 首帧阶段改一次 ¥0.2，视频阶段改一次 ¥5
