@@ -1,0 +1,145 @@
+{
+  "seedance-2-0": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/seedance-2-0",
+    "license": "AGPL-3.0",
+    "files": 1,
+    "bytes": 17796,
+    "description": " Generate cinematic clips with ByteDance Seedance 2.0 — the preferred premium video model in OpenMontage when a paid gateway is configured. Use when: (1) producing trailers, teasers, hype edits, or premium cinematic clips, (2) needing native synchronized audio (speech, SFX, ambience) in a single pass, (3) needing multi-shot cuts inside one generation, (4) needing director-level camera control, (5)",
+    "warnings": [
+      "描述提到已废弃的「heygen」，需人判断是支持还是依赖：…ai (`seedance_video` tool), HeyGen (Video Agent / Avatar Shots), Replicate, Runway (Enterprise, non-US), Freep…",
+      "没有「陷阱」小节"
+    ]
+  },
+  "visual-style": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/visual-style",
+    "license": "AGPL-3.0",
+    "files": 16,
+    "bytes": 82728,
+    "description": " Create, extract, and apply portable visual design systems via visual-style.md files. Use when: (1) Creating a visual-style.md design system from scratch, (2) Extracting a visual style from a website URL, video, or PDF brand guide, (3) Applying a visual style to HeyGen videos, HTML slides, Figma, or paper.design, (4) Browsing the gallery of pre-built visual styles (Swiss, Saul Bass, Game Boy, etc.",
+    "warnings": [
+      "描述提到已废弃的「heygen」，需人判断是支持还是依赖：…isual style from a website URL, video, or PDF brand guide, (3) Applying a visual style to HeyGen videos, HTML …",
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "video-understand": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/video-understand",
+    "license": "AGPL-3.0",
+    "files": 3,
+    "bytes": 27390,
+    "description": " Understand video content locally using ffmpeg frame extraction and Whisper transcription. No API keys needed. Use when: (1) Understanding what a video contains, (2) Transcribing video audio locally, (3) Extracting key frames for visual analysis, (4) Getting video content without API keys.",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "ffmpeg": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/ffmpeg",
+    "license": "AGPL-3.0",
+    "files": 2,
+    "bytes": 17909,
+    "description": "Video and audio processing with FFmpeg. Use for format conversion, resizing, compression, audio extraction, and preparing assets for Remotion. Triggers include converting GIF to MP4, resizing video, extracting audio, compressing files, or any media transformation task.",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "video-edit": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/video-edit",
+    "license": "AGPL-3.0",
+    "files": 2,
+    "bytes": 12606,
+    "description": " Edit videos locally using ffmpeg. Trim, concat, resize, speed, overlay, extract audio, compress, and convert. Use when: (1) Trimming or cutting video segments, (2) Concatenating multiple clips, (3) Resizing video for social platforms, (4) Extracting or replacing audio, (5) Compressing video, (6) Converting video formats, (7) Getting video info.",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "flux-best-practices": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/flux-best-practices",
+    "license": "AGPL-3.0",
+    "files": 14,
+    "bytes": 124588,
+    "description": "Comprehensive guide for BFL FLUX image generation models. Covers prompting, T2I, I2I, structured JSON, hex colors, typography, multi-reference editing, and model-specific best practices for FLUX.2 and FLUX.1 families.",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "doubao-tts": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/doubao-tts",
+    "license": "AGPL-3.0",
+    "files": 1,
+    "bytes": 4058,
+    "description": "Generate Mandarin and multilingual narration with Volcengine Doubao Speech 2.0. Use when creating Chinese voiceovers, when the user prefers Doubao/Volcengine/火山引擎/豆包 TTS, or when narration needs character-level timestamp metadata for subtitles.",
+    "warnings": [
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
+  },
+  "speech-to-text": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/speech-to-text",
+    "license": "AGPL-3.0",
+    "files": 7,
+    "bytes": 41109,
+    "description": "Transcribe audio to text using ElevenLabs Scribe v2. Use when converting audio/video to text, generating subtitles, transcribing meetings, or processing spoken content.",
+    "warnings": [
+      "没有「陷阱」小节"
+    ]
+  },
+  "sound-effects": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/sound-effects",
+    "license": "AGPL-3.0",
+    "files": 2,
+    "bytes": 5431,
+    "description": "Generate sound effects from text descriptions using ElevenLabs. Use when creating sound effects, generating audio textures, producing ambient sounds, cinematic impacts, UI sounds, or any audio that isn't speech. Supports looping, duration control, and prompt influence tuning.",
+    "warnings": [
+      "没有「陷阱」小节"
+    ]
+  },
+  "media-use": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/media-use",
+    "license": "AGPL-3.0",
+    "files": 19,
+    "bytes": 67103,
+    "description": "Agent Media OS — resolve any media need (BGM, SFX, image, icon) into a frozen local file + ledger record. One verb (`resolve`) handles the full cascade — project cache, global cache, HeyGen catalog search, freeze, register. Keeps search noise on disk, hands the agent a path. Use when a composition needs background music, sound effects, images, or icons.",
+    "warnings": [
+      "描述提到已废弃的「heygen」，需人判断是支持还是依赖：…One verb (`resolve`) handles the full cascade — project cache, global cache, HeyGen catalog search, freeze, re…",
+      "没有「陷阱」小节"
+    ]
+  },
+  "provider-model-refresh": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/provider-model-refresh",
+    "license": "AGPL-3.0",
+    "files": 1,
+    "bytes": 5529,
+    "description": "Use the September 2026 image, video, speech and Avatar V adapters with explicit model/host contracts.",
+    "warnings": [
+      "正文提到已废弃的「heygen」，需人判断是支持还是依赖：…| HeyGen Avatar V | heygen_avatar | — |…",
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节"
+    ]
+  },
+  "bfl-api": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/bfl-api",
+    "license": "AGPL-3.0",
+    "files": 10,
+    "bytes": 81192,
+    "description": "BFL FLUX API integration guide covering endpoints, async polling patterns, rate limiting, error handling, webhooks, and regional endpoints with Python and TypeScript code examples.",
+    "warnings": [
+      "没有「陷阱」小节"
+    ]
+  }
+}

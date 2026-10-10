@@ -9,6 +9,7 @@
 用法： python tools/verify.py
 退出码 0 = 全部通过。
 """
+import json
 import os
 import re
 import subprocess
@@ -207,6 +208,27 @@ def check_pipeline():
     if not has_ff or missing:
         return
     run_child("tools/validate_manifest.py", "流水线清单校验（结构 + 契约）")
+    # 技术技能库：登记必须与磁盘一致。登记了却没有文件 = 谎报，
+    # 有文件却没登记 = 不知道哪来的（无法判断过时没有）。
+    prov_path = os.path.join(ROOT, "skills", "techniques", "_provenance.json")
+    if os.path.exists(prov_path):
+        with open(prov_path, encoding="utf-8") as f:
+            prov = json.load(f)
+        bad = []
+        for name in prov:
+            sm = os.path.join(ROOT, "skills", "techniques", name, "SKILL.md")
+            if not os.path.exists(sm):
+                bad.append(name)
+        ok("管线", "技能库登记与实际一致（%d 个包）" % len(prov), not bad,
+           "" if not bad else "登记了但缺 SKILL.md：%s" % ", ".join(bad[:4]))
+        on_disk = set()
+        base = os.path.join(ROOT, "skills", "techniques")
+        if os.path.isdir(base):
+            on_disk = {d for d in os.listdir(base)
+                       if os.path.isdir(os.path.join(base, d))}
+        unreg = sorted(on_disk - set(prov))
+        ok("管线", "技能库无未登记来源", not unreg,
+           "" if not unreg else "未登记：%s" % ", ".join(unreg[:4]))
     run_child("tools/verify_ffmpeg.py", "ffmpeg 功能验证（编码器/滤镜/中文字幕）")
     run_child("pipeline/selftest.py", "管线端到端自检（抽帧/衔接/拼接/字幕）")
     run_child("pipeline/selftest_llm.py", "第 1/2/5/6 阶段自检（LLM/抽取/落库/组装/反向验证）")

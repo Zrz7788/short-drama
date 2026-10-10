@@ -1,0 +1,310 @@
+# -*- coding: utf-8 -*-
+"""技能获取与安装 —— 带质量门禁。
+
+"必须能下载安装技能"和"不好用的不要"是同一件事的两面：前者是能力，
+后者是门禁。这个脚本把门禁写成可执行的检查，而不是靠感觉。
+
+用法：
+  # 列出候选并逐个评分（不安装）
+  python tools/install_skill.py --list --tar <tarball>
+
+  # 从本地 tarball 安装指定包
+  python tools/install_skill.py --tar <tarball> --install seedance-2-0 visual-style
+
+  # 从 URL 安装单个 SKILL.md
+  python tools/install_skill.py --from-url https://... --name foo
+
+  # 只检查不落盘
+  python tools/install_skill.py --tar <tarball> --install X --dry-run
+
+质量门禁分两类，刻意分开：
+  硬性（不过就拒绝）—— 格式与废弃标记。这些是客观的。
+  提示（只标记）—— 体积异常、出处缺失、描述稀薄。这些需要人判断。
+**相关性不进门禁**：脚本判断不了"这个技能对我们这条流水线有没有用"，
+它只把描述打出来让人决定。把相关性做成自动判断只会制造假信心。
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import tarfile
+import urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEST_ROOT = os.path.join(ROOT, "skills", "techniques")
+PROVENANCE = os.path.join(DEST_ROOT, "_provenance.json")
+
+# 硬性拒绝：自我标注废弃 / 明确被取代
+DEPRECATED_PAT = re.compile(
+    r"\[DEPRECATED\]|\bdeprecated\b|use\s+`?[\w-]+`?\s+instead",
+    re.I)
+# 硬性要求
+MIN_BODY = 1200          # 正文最小字符数，低于此多半是壳
+MIN_DESC = 40            # description 最小长度
+# 提示阈值
+BIG_PACK = 5 * 1024 * 1024
+
+
+def red(s):
+    return "\033[31m%s\033[0m" % s if sys.stdout.isatty() else s
+
+
+def green(s):
+    return "\033[32m%s\033[0m" % s if sys.stdout.isatty() else s
+
+
+def yellow(s):
+    return "\033[33m%s\033[0m" % s if sys.stdout.isatty() else s
+
+
+def parse_frontmatter(text):
+    """取出 YAML frontmatter 的 name 与 description。没有就返回空。"""
+    m = re.match(r"^---\s*\n(.*?)\n---\s*\n", text, re.S)
+    if not m:
+        return None
+    fm = m.group(1)
+    out = {}
+    nm = re.search(r"^name:\s*(.+)$", fm, re.M)
+    if nm:
+        out["name"] = nm.group(1).strip().strip("\"'")
+    dm = re.search(r"^description:\s*(.*?)(?=^[a-zA-Z_]+:|\Z)", fm, re.M | re.S)
+    if dm:
+        out["description"] = re.sub(r"\s+", " ", dm.group(1)).strip().strip("\"'|>-")
+    out["_raw"] = fm
+    return out
+
+
+def deprecated_names(packs):
+    """先算出哪些包自我标注了废弃。用于第二遍的依赖检查。"""
+    out = set()
+    for n, p in packs.items():
+        if p["skill_md"] and DEPRECATED_PAT.search(p["skill_md"][:4000]):
+            out.add(n)
+    return out
+
+
+def gate(name, skill_md, files, total_bytes, deprecated=()):
+    """返回 (ok, 硬性问题列表, 提示列表)。"""
+    hard, soft = [], []
+    if skill_md is None:
+        hard.append("没有 SKILL.md —— 格式不合格，无法作为技能加载")
+        return False, hard, soft
+
+    fm = parse_frontmatter(skill_md)
+    if not fm:
+        hard.append("没有 YAML frontmatter（技能系统靠它取 name/description）")
+    else:
+        if not fm.get("name"):
+            hard.append("frontmatter 缺 name")
+        if not fm.get("description"):
+            hard.append("frontmatter 缺 description")
+        elif len(fm["description"]) < MIN_DESC:
+            hard.append("description 只有 %d 字符，不足以让智能体判断何时该用"
+                        % len(fm["description"]))
+
+    body = skill_md
+    if fm:
+        body = re.sub(r"^---\s*\n.*?\n---\s*\n", "", skill_md, count=1, flags=re.S)
+    if len(body) < MIN_BODY:
+        hard.append("正文只有 %d 字符，低于 %d 的底线——多半是壳，不是技能"
+                    % (len(body), MIN_BODY))
+
+    if DEPRECATED_PAT.search(skill_md[:4000]):
+        hard.append("自我标注了废弃或被取代的信号")
+
+    # 依赖检查：某个包合格，但它可能依赖了被拒的包。
+    #
+    # ⚠️ 教训：这条**不能**做成硬性拒绝。第一版是硬拒，结果 seedance-2-0、
+    # visual-style 这些好包全被拒了——因为它们在正文里把 HeyGen 列为**反例**
+    # （"Do not invent a Replicate, HeyGen, or Higgsfield identifier"）。
+    # 名字出现在文本里 ≠ 依赖它。
+    #
+    # 而且过度拒绝的失败方向更糟：它是**静默地丢掉好材料**，比给个警告危险。
+    # 所以这里只标记，并把原文上下文带出来，让人一眼判断是"支持"还是"依赖"。
+    desc = (fm or {}).get("description", "")
+    full = desc + "\n" + body
+    for dep in deprecated:
+        if dep == name:
+            continue
+        m = re.search(r"[^.\n]{0,90}\b%s\b[^.\n]{0,90}" % re.escape(dep), full, re.I)
+        if not m:
+            continue
+        where = "描述" if re.search(r"\b%s\b" % re.escape(dep), desc, re.I) else "正文"
+        soft.append("%s提到已废弃的「%s」，需人判断是支持还是依赖：…%s…"
+                    % (where, dep, m.group(0).strip()[:110]))
+
+    # 提示类
+    if total_bytes > BIG_PACK:
+        soft.append("体积 %.1f MB 偏大，可能有大量媒体资源" % (total_bytes / 1048576.0))
+    if not re.search(r"https?://", skill_md):
+        soft.append("没有出处 URL（可信度无法追溯）")
+    if not re.search(r"^#{1,3}\s*(Common Pitfalls|常见陷阱|Pitfalls)", skill_md, re.M):
+        soft.append("没有「陷阱」小节")
+    if not re.search(r"^\|.*\|", skill_md, re.M):
+        soft.append("没有表格（结构化信息少）")
+    return not hard, hard, soft
+
+
+def load_tar(path):
+    """返回 {pack: {"skill_md": str|None, "files": int, "bytes": int,
+                    "body_files": [(rel, bytes)]}}"""
+    packs = {}
+    with tarfile.open(path, "r:gz") as tf:
+        for m in tf.getmembers():
+            if not m.isfile():
+                continue
+            parts = m.name.split("/", 1)
+            if len(parts) < 2:
+                continue
+            rel = parts[1]
+            if not rel.startswith(".agents/skills/"):
+                continue
+            seg = rel[len(".agents/skills/"):].split("/")
+            pack = seg[0]
+            p = packs.setdefault(pack, {"skill_md": None, "files": 0, "bytes": 0,
+                                        "body_files": []})
+            p["files"] += 1
+            p["bytes"] += m.size
+            p["body_files"].append((rel, m.size))
+            if len(seg) == 2 and seg[1].lower() == "skill.md":
+                p["skill_md"] = tf.extractfile(m).read().decode("utf-8", "replace")
+    return packs
+
+
+def do_list(packs):
+    print("%-32s %5s %9s %8s  %s" % ("技能包", "文件", "体积", "门禁", "说明"))
+    print("-" * 132)
+    dep = deprecated_names(packs)
+    n_ok = 0
+    for name in sorted(packs, key=lambda n: -packs[n]["bytes"]):
+        p = packs[name]
+        ok, hard, soft = gate(name, p["skill_md"], p["files"], p["bytes"], dep)
+        if ok:
+            n_ok += 1
+        fm = parse_frontmatter(p["skill_md"] or "") or {}
+        desc = (fm.get("description") or "")[:52]
+        mark = green("通过") if ok else red("拒绝")
+        note = desc if ok else hard[0][:60]
+        print("%-32s %5d %8.1fKB %8s  %s"
+              % (name, p["files"], p["bytes"] / 1024.0, mark, note))
+    print("\n共 %d 个，通过门禁 %d 个，拒绝 %d 个"
+          % (len(packs), n_ok, len(packs) - n_ok))
+
+
+def do_install(packs, names, dry_run):
+    os.makedirs(DEST_ROOT, exist_ok=True)
+    prov = {}
+    if os.path.exists(PROVENANCE):
+        prov = json.load(open(PROVENANCE, encoding="utf-8"))
+    installed, rejected = [], []
+    with tarfile.open(ARGS.tar, "r:gz") as tf:
+        members = {}
+        for m in tf.getmembers():
+            if m.isfile():
+                parts = m.name.split("/", 1)
+                if len(parts) == 2 and parts[1].startswith(".agents/skills/"):
+                    members.setdefault(
+                        parts[1][len(".agents/skills/"):].split("/")[0], []).append(m)
+        dep = deprecated_names(packs)
+        for name in names:
+            if name not in packs:
+                rejected.append((name, "tarball 里没有这个包"))
+                continue
+            p = packs[name]
+            ok, hard, soft = gate(name, p["skill_md"], p["files"], p["bytes"], dep)
+            if not ok:
+                rejected.append((name, hard[0]))
+                continue
+            if dry_run:
+                installed.append(name)
+                continue
+            # rel 已经是「<包名>/<其余路径>」，所以直接拼到库根目录，
+            # **不能**再拼一次包名——否则会变成 <包名>/<包名>/SKILL.md。
+            # 实测踩过，是 verify.py 的「登记与实际一致」检查逮住的。
+            n = 0
+            for m in members[name]:
+                rel = m.name.split("/.agents/skills/", 1)[1]
+                out = os.path.join(DEST_ROOT, rel.replace("/", os.sep))
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                with tf.extractfile(m) as src, open(out, "wb") as f:
+                    f.write(src.read())
+                n += 1
+            fm = parse_frontmatter(p["skill_md"]) or {}
+            prov[name] = {
+                "source": "github.com/calesthio/OpenMontage",
+                "path": ".agents/skills/" + name,
+                "license": "AGPL-3.0",
+                "files": n,
+                "bytes": p["bytes"],
+                "description": fm.get("description", "")[:400],
+                "warnings": soft,
+            }
+            installed.append(name)
+
+    if not dry_run and installed:
+        with open(PROVENANCE, "w", encoding="utf-8") as f:
+            json.dump(prov, f, ensure_ascii=False, indent=2)
+    print("安装 %d 个%s：" % (len(installed), "（dry-run，未落盘）" if dry_run else ""))
+    for n in installed:
+        print("  [OK] %s" % n)
+    for n, why in rejected:
+        print("  [拒绝] %s —— %s" % (n, why))
+    return len(rejected)
+
+
+def main():
+    global ARGS
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tar", help="本地 tarball 路径")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--install", nargs="*", default=[])
+    ap.add_argument("--from-url")
+    ap.add_argument("--name")
+    ap.add_argument("--dry-run", action="store_true")
+    ARGS = ap.parse_args()
+
+    if ARGS.from_url:
+        req = urllib.request.Request(ARGS.from_url, headers={"User-Agent": "dsh"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            text = r.read().decode("utf-8", "replace")
+        name = ARGS.name or "unnamed"
+        ok, hard, soft = gate(name, text, 1, len(text))
+        print("来源:", ARGS.from_url)
+        print("门禁:", "通过" if ok else "拒绝")
+        for h in hard:
+            print("  [硬性] %s" % h)
+        for s in soft:
+            print("  [提示] %s" % s)
+        if not ok:
+            return 1
+        if ARGS.dry_run:
+            print("dry-run，未落盘")
+            return 0
+        dest = os.path.join(DEST_ROOT, name)
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, "SKILL.md"), "w", encoding="utf-8") as f:
+            f.write(text)
+        prov = {}
+        if os.path.exists(PROVENANCE):
+            prov = json.load(open(PROVENANCE, encoding="utf-8"))
+        prov[name] = {"source": ARGS.from_url, "files": 1, "bytes": len(text),
+                      "description": (parse_frontmatter(text) or {}).get("description", "")[:400],
+                      "warnings": soft}
+        with open(PROVENANCE, "w", encoding="utf-8") as f:
+            json.dump(prov, f, ensure_ascii=False, indent=2)
+        print("已安装到", os.path.relpath(dest, ROOT))
+        return 0
+
+    if not ARGS.tar:
+        ap.error("需要 --tar 或 --from-url")
+    packs = load_tar(ARGS.tar)
+    if ARGS.list or not ARGS.install:
+        do_list(packs)
+    if ARGS.install:
+        return 1 if do_install(packs, ARGS.install, ARGS.dry_run) else 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

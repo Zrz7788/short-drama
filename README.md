@@ -47,6 +47,7 @@ tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
   setup_ffmpeg.py    下载便携版 ffmpeg
   validate_manifest.py  流水线清单校验（零依赖，查结构 + 契约）
+  install_skill.py   技能获取与安装（带质量门禁：硬性拒绝 + 提示）
   verify.py          全量验收（含全链路集成）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
