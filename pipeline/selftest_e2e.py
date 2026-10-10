@@ -152,10 +152,20 @@ def main():
     con = C.connect(TEST_DB)
     views = dict(con.execute("SELECT view, COUNT(*) FROM entity_ref GROUP BY view").fetchall())
     n_main = con.execute("SELECT COUNT(*) FROM entity WHERE role='main'").fetchone()[0]
-    rep.add("参考图视角齐备",
-            views.get("front") == n_main and views.get("side") == n_main
-            and views.get("back") == n_main and views.get("characters", 0) >= n_main,
-            " ".join("%s=%d" % kv for kv in sorted(views.items())))
+    # 新素材体系（三视图已废弃）：人物出 fullbody（人人有）+ headshot（main 才有），
+    # 场景出 scene_front。按实体数推导，不写死视角名与张数。
+    n_char = con.execute("SELECT COUNT(*) FROM entity WHERE kind='character' "
+                         "AND role IN ('main','secondary')").fetchone()[0]
+    n_char_main = con.execute("SELECT COUNT(*) FROM entity WHERE kind='character' "
+                              "AND role='main'").fetchone()[0]
+    n_loc = con.execute("SELECT COUNT(*) FROM entity WHERE kind='location' "
+                        "AND role IN ('main','secondary')").fetchone()[0]
+    rep.add("参考图视角齐备（人物全身照 + main 大头照 + 场景正视图）",
+            views.get("fullbody", 0) >= n_char
+            and views.get("headshot", 0) >= n_char_main
+            and views.get("scene_front", 0) >= n_loc,
+            " ".join("%s=%d" % kv for kv in sorted(views.items()))
+            + "　（人物%d/main%d，场景%d）" % (n_char, n_char_main, n_loc))
     bg = con.execute("SELECT COUNT(*) FROM entity_ref r JOIN entity e ON e.id=r.entity_id "
                      "WHERE e.role='background'").fetchone()[0]
     rep.add("background 级未出图（分级兑现成钱）", bg == 0, "%d 张" % bg)
