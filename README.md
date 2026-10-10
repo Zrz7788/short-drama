@@ -27,11 +27,12 @@ pipeline/           管线阶段脚本
   stage_refs.py       第 3/4 阶段：定妆照与三视图（--phase 区分）
   stage_storyboard.py 第 5 阶段：生成分镜（含按镜抽卡策略）
   stage_prompts.py    第 6 阶段：提示词定稿（确定性组装，不走 LLM）
+  stage_firstframes.py 第 7 阶段：生成首帧图（关键帧）
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
   assemble.py         第 10 阶段：拼接成集、可选烧字幕
   selftest.py         管线端到端自检（合成素材 + 临时库）
   selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
-  selftest_ark.py     第 3/4 阶段自检（本地假 Ark 服务 + 临时库）
+  selftest_ark.py     第 3/4/7 阶段自检（本地假 Ark 服务 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
@@ -180,7 +181,7 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | 4 三视图 | `python pipeline\stage_refs.py --episode-id N --phase turnaround` | `entity_ref(front/side/back)` | ✅ |
 | **5 生成分镜** | `python pipeline\stage_storyboard.py --episode-id N` | `shot`、`shot_entity` | ✅ |
 | **6 提示词定稿** | `python pipeline\stage_prompts.py --episode-id N` | `shot.prompt`、`negative_prompt` | ✅ |
-| 7 首帧图 | 待写 | `shot.first_frame_path` | ⏳ 待密钥 |
+| 7 首帧图 | `python pipeline\stage_firstframes.py --episode-id N` | `shot.keyframe_path` | ✅ |
 | 8 视频生成 | 待写 | `generation` | ⏳ 待密钥 |
 | **9 抽帧与衔接** | `python pipeline\frames.py --episode-id N` | `*_first/last.png`、`continues_from` | ✅ |
 | **10 拼接与字幕** | `python pipeline\assemble.py --episode-id N [--srt F]` | `out/E0N.mp4`、`asset` | ✅ |
@@ -250,6 +251,27 @@ python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
 所以解析一律防御式——取不到预期字段时把**原始响应落盘**到 `.tools/ark-debug/`
 并在报错里给出路径。第一次真实调用要么成功，要么直接告诉我们要改哪里，
 而不是抛一句无从下手的 `KeyError`。
+
+### 第 7 阶段的要点：最后一道便宜的关卡
+
+首帧图约 **¥0.2/张**，视频约 **¥4–5.8/条**，差着 20–30 倍。
+所以正确的打法是在首帧图上多抽几次选最好的一张，再去生视频——
+而不是把预算烧在视频抽卡上。**这是成片前最后一个便宜的关卡。**
+
+- 提示词直接取第 6 阶段定稿的 `shot.prompt`（实体描述已逐字内联）
+- 把该镜关联实体的参考图作为**图生图输入**传进去（最多 4 张，按
+  主体 → 道具 → 布景排序），保证画面里的角色就是定妆照那个
+- `--take N` 每镜抽 N 张，候选都落在 `assets/keyframes/`，选定后手工把要用的
+  那张写回 `shot.keyframe_path`
+- 产出写 `shot.keyframe_path`，**刻意与 `first_frame_path` 分开**：
+  后者的语义是"这一镜实际用的首帧"，会被第 9 阶段的续接逻辑覆盖
+  （续接时它等于上一镜的尾帧）
+
+```powershell
+python pipeline\stage_firstframes.py --episode-id 1 --dry-run     # 先看张数与金额
+python pipeline\stage_firstframes.py --episode-id 1 --take 2      # 每镜抽 2 张挑
+python pipeline\stage_firstframes.py --episode-id 1 --only 3,4,5  # 只重做难镜头
+```
 
 ### 第 5 阶段的要点：抽卡策略
 
@@ -401,9 +423,9 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
 | 第 1/2/5/6 阶段脚本 | ✅ 剧本、实体分级、分镜、提示词定稿，49 项自检通过 |
-| 第 3/4 阶段脚本 | ✅ 定妆照、三视图；Ark 客户端字段名取自真实实现，36 项自检通过 |
+| 第 3/4/7 阶段脚本 | ✅ 定妆照、三视图、首帧图；Ark 客户端字段名取自真实实现，49 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
 | 全量验收 | ✅ `python tools\verify.py`，32 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
-| Ark API Key | ⏳ 待提供，之后可跑第 7/8 阶段的真实生成 |
-| 第 7/8 阶段脚本 | ⏳ 待写（首帧图、视频生成） |
+| Ark API Key | ⏳ 待提供，之后可跑第 8 阶段的真实生成 |
+| 第 8 阶段脚本 | ⏳ 待写（视频生成：draft / direct / final 三种模式） |

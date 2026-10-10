@@ -55,6 +55,10 @@ COLUMN_MIGRATIONS = [
     # 第 5 阶段产出、第 6 阶段消费：可见动作与光线
     ("shot", "action", "ALTER TABLE shot ADD COLUMN action TEXT"),
     ("shot", "lighting", "ALTER TABLE shot ADD COLUMN lighting TEXT"),
+    # 第 7 阶段产出的关键帧（首帧图）。
+    # 刻意与 first_frame_path 分开：后者的语义是"这一镜实际用的首帧"，
+    # 会被第 9 阶段的续接逻辑覆盖（续接时它等于上一镜的尾帧）。
+    ("shot", "keyframe_path", "ALTER TABLE shot ADD COLUMN keyframe_path TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

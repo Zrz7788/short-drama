@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""第 3/4 阶段的端到端自检。
+"""第 3/4/7 阶段的端到端自检。
 
-在本地起一个**假的火山方舟服务**，让 stage_refs.py 真跑一遍：
-请求组装 -> 图片下载 -> 落库 -> 成本记账。
+在本地起一个**假的火山方舟服务**，让 stage_refs.py 与 stage_firstframes.py
+真跑一遍：请求组装 -> 图片下载 -> 落库 -> 成本记账。
 
 刻意覆盖几种真实会遇到的坏情况：
   - 响应结构不符预期（防御式解析应把原始响应落盘并给出可读错误）
@@ -32,7 +32,7 @@ TEST_ROOT = os.path.join(C.ROOT, ".tools", "ark-test")
 TEST_DB = os.path.join(TEST_ROOT, "test.db")
 TEST_ASSETS = os.path.join(TEST_ROOT, "assets")
 
-rep = C.Report("第 3/4 阶段自检")
+rep = C.Report("第 3/4/7 阶段自检")
 
 ENTITIES = [
     ("character", "林薇", "main", "32岁女性，东亚面孔，齐肩黑直发，杏眼，左眉尾浅疤"),
@@ -108,17 +108,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def run_stage(args, base_url, api_key="test-key", assets=None):
+def run_script(script, args, base_url, api_key="test-key", assets=None):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     if base_url:
         env["ARK_BASE_URL"] = base_url
     env["ARK_API_KEY"] = api_key
     env["DSH_ASSETS_ROOT"] = assets or TEST_ASSETS
-    p = subprocess.run([sys.executable, "-X", "utf8",
-                        os.path.join(C.ROOT, "pipeline", "stage_refs.py")] + args,
-                       cwd=C.ROOT, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", env=env)
-    return p
+    return subprocess.run([sys.executable, "-X", "utf8",
+                           os.path.join(C.ROOT, "pipeline", script)] + args,
+                          cwd=C.ROOT, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env)
+
+
+def run_stage(args, base_url, api_key="test-key", assets=None):
+    return run_script("stage_refs.py", args, base_url, api_key, assets)
 
 
 def main():
@@ -262,8 +265,91 @@ def main():
     rep.add("发起了 %d 次请求" % want_portrait,
             len(Handler.requests) == want_portrait, "%d 次" % len(Handler.requests))
 
-    # ---- 7. 401 鉴权失败 ----
-    print("\n=== 7. 401 应提示检查 key 与模型权限 ===")
+    # ---- 7. 第 7 阶段：首帧图 ----
+    print("\n=== 7. 第 7 阶段 stage_firstframes.py ===")
+    con = C.connect(TEST_DB)
+    ent_id = {r["name"]: r["id"] for r in con.execute("SELECT id, name FROM entity")}
+    shot_plan = [
+        (["林薇", "出租屋"], "近景", "【提示词】第1镜 林薇站在窗边攥着化验单"),
+        (["陈默", "出租屋"], "中景", "【提示词】第2镜 陈默推门进来"),
+        (["林薇", "陈默"], "特写", "【提示词】第3镜 两人对峙，林薇抬眼"),
+    ]
+    shot_ids = []
+    for i, (names, size, prompt) in enumerate(shot_plan, start=1):
+        sid = con.execute(
+            "INSERT INTO shot (episode_id, seq, duration_s, shot_size, camera_move,"
+            " description, action, lighting, prompt, strategy, draws_planned) "
+            "VALUES (?,?,4,?,'固定',?,?,?,?,'draft',3)",
+            (eid, i, size, "第%d镜" % i, "动作", "冷调", prompt)).lastrowid
+        for n in names:
+            con.execute("INSERT INTO shot_entity (shot_id, entity_id, role) "
+                        "VALUES (?,?,'subject')", (sid, ent_id[n]))
+        shot_ids.append(sid)
+    con.commit()
+    con.close()
+    rep.add("分镜与实体关联已备好", True, "%d 个镜头" % len(shot_ids))
+
+    Handler.requests.clear()
+    p = run_script("stage_firstframes.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB], base)
+    rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    if p.returncode:
+        print("\n".join(p.stdout.strip().splitlines()[-16:]))
+
+    rep.add("每镜一次请求", len(Handler.requests) == len(shot_plan),
+            "%d 次（预期 %d）" % (len(Handler.requests), len(shot_plan)))
+    rep.add("请求用的是第 6 阶段定稿的提示词",
+            bool(Handler.requests) and all(
+                r["body"].get("prompt", "").startswith("【提示词】")
+                for r in Handler.requests),
+            (Handler.requests[0]["body"].get("prompt", "")[:30] + "…")
+            if Handler.requests else "")
+    rep.add("带上了实体参考图（图生图）",
+            bool(Handler.requests) and all("image" in r["body"] for r in Handler.requests),
+            "首条参考图 %d 张"
+            % len(Handler.requests[0]["body"].get("image", [])) if Handler.requests else "")
+
+    con = C.connect(TEST_DB)
+    n_kf = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=? AND keyframe_path "
+                       "IS NOT NULL", (eid,)).fetchone()[0]
+    rep.add("keyframe_path 已写入", n_kf == len(shot_plan),
+            "%d / %d" % (n_kf, len(shot_plan)))
+    miss = 0
+    for r in con.execute("SELECT keyframe_path FROM shot WHERE episode_id=?", (eid,)):
+        if not os.path.exists(C.abs_path(r["keyframe_path"])):
+            miss += 1
+    rep.add("首帧文件都已下载", miss == 0, "%d 个缺失" % miss)
+    n_gen = con.execute("SELECT COUNT(*) FROM image_generation WHERE view LIKE 'shot:%'"
+                        ).fetchone()[0]
+    rep.add("image_generation 记了镜头维度", n_gen == len(shot_plan), "%d 条" % n_gen)
+    cost7 = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger "
+                        "WHERE category='image'").fetchone()[0]
+    n_ok = con.execute("SELECT COUNT(*) FROM image_generation WHERE status='succeeded'"
+                       ).fetchone()[0]
+    # 期望：定妆照 + 三视图 + --force 重出的定妆照 + 首帧图
+    expect_imgs = want_portrait + want_turn + want_portrait + len(shot_plan)
+    rep.add("成功出图总张数符合预期", n_ok == expect_imgs, "%d 张" % n_ok)
+    rep.add("成本 = 成功张数 × 单价", abs(cost7 - n_ok * 0.20) < 1e-6,
+            "¥%.2f（%d 张 × ¥0.20）" % (cost7, n_ok))
+    con.close()
+
+    Handler.requests.clear()
+    run_script("stage_firstframes.py", ["--episode-id", str(eid), "--db", TEST_DB], base)
+    rep.add("第 7 阶段重跑幂等", len(Handler.requests) == 0,
+            "%d 次请求" % len(Handler.requests))
+
+    Handler.requests.clear()
+    run_script("stage_firstframes.py",
+               ["--episode-id", str(eid), "--db", TEST_DB, "--take", "2",
+                "--only", "1", "--force"], base)
+    rep.add("--take 2 发起 2 次请求", len(Handler.requests) == 2,
+            "%d 次" % len(Handler.requests))
+    rep.add("候选落在隔离的临时素材根",
+            os.path.isdir(os.path.join(TEST_ASSETS, "keyframes")),
+            os.path.relpath(os.path.join(TEST_ASSETS, "keyframes"), C.ROOT))
+
+    # ---- 8. 401 鉴权失败 ----
+    print("\n=== 8. 401 应提示检查 key 与模型权限 ===")
     Handler.state["mode"] = "401"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
                    "--force", "--only", "林薇"], base)
@@ -274,7 +360,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 8. 响应结构不符预期 ----
-    print("\n=== 8. 响应结构不符预期时应给出可读错误 ===")
+    print("\n=== 9. 响应结构不符预期时应给出可读错误 ===")
     Handler.state["mode"] = "bad_shape"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
                    "--force", "--only", "林薇"], base)
@@ -289,7 +375,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 9. 429 限流退避重试 ----
-    print("\n=== 9. 429 应退避重试后成功 ===")
+    print("\n=== 10. 429 应退避重试后成功 ===")
     Handler.state["mode"] = "429"
     Handler.state["n429"] = 0
     Handler.requests.clear()
@@ -301,7 +387,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 10. 缺 key 时报错可操作 ----
-    print("\n=== 10. 未配置密钥时应给出可操作的提示 ===")
+    print("\n=== 11. 未配置密钥时应给出可操作的提示 ===")
     env = dict(os.environ, PYTHONIOENCODING="utf-8", DSH_ASSETS_ROOT=TEST_ASSETS)
     env.pop("ARK_API_KEY", None)
     p = subprocess.run([sys.executable, "-X", "utf8",
@@ -315,7 +401,7 @@ def main():
             next((l.strip() for l in blob.splitlines() if "ARK_API_KEY" in l), "")[:60])
 
     # ---- 11. 隔离性 ----
-    print("\n=== 11. 隔离性 ===")
+    print("\n=== 12. 隔离性 ===")
     prod = C.connect(C.DEFAULT_DB)
     n = prod.execute("SELECT COUNT(*) FROM entity_ref").fetchone()[0]
     m = prod.execute("SELECT COUNT(*) FROM image_generation").fetchone()[0]

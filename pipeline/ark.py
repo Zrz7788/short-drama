@@ -173,9 +173,13 @@ def extract_images(resp, tag="image"):
     return out
 
 
-def generate_image(prompt, size="2K", reference=None, model=None,
+def generate_image(prompt, size="2K", reference=None, references=None, model=None,
                    base_url=None, api_key=None, timeout=300, retries=2):
-    """同步生成图片。reference 为本机图片路径时走图生图（内联 data URL）。
+    """同步生成图片。
+
+    reference  单张参考图路径（图生图）
+    references 多张参考图路径列表（官方支持最多 14 张）
+    两张都传时合并去重；都没有则走文生图。
 
     返回 {"model": 实际模型, "urls": [...], "raw": 原始响应}
     """
@@ -184,6 +188,13 @@ def generate_image(prompt, size="2K", reference=None, model=None,
     if size not in SIZE_PRESETS and "x" not in size:
         raise ArkError("size 只能是 %s 或 '宽x高'，收到 %r" % (SIZE_PRESETS, size))
 
+    refs = []
+    for r in ([reference] if reference else []) + list(references or []):
+        if r and r not in refs:
+            refs.append(r)
+    if len(refs) > 14:
+        raise ArkError("参考图最多 14 张，收到 %d 张" % len(refs))
+
     body = {
         "model": model,
         "prompt": prompt,
@@ -191,17 +202,19 @@ def generate_image(prompt, size="2K", reference=None, model=None,
         "size": size,
         "watermark": False,
     }
-    if reference:
-        if not os.path.exists(reference):
-            raise ArkError("参考图不存在：%s" % reference)
-        body["image"] = [to_data_url(reference)]
+    if refs:
+        for r in refs:
+            if not os.path.exists(r):
+                raise ArkError("参考图不存在：%s" % r)
+        # 官方收的是 data URL 数组，不是 URL 字符串
+        body["image"] = [to_data_url(r) for r in refs]
 
     resp = _post(cfg["base_url"] + "/images/generations", body,
                  cfg["api_key"], timeout, retries, "image")
     urls = extract_images(resp, "image")
     # 官方不保证回传 model，回落请求值以便追溯
     used = (resp.get("model") or "").strip() or model
-    return {"model": used, "urls": urls, "raw": resp}
+    return {"model": used, "urls": urls, "raw": resp, "n_references": len(refs)}
 
 
 # ------------------------------------------------------------------ 视频（异步任务）

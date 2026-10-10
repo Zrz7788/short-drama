@@ -180,8 +180,9 @@ CREATE TABLE IF NOT EXISTS shot (
     draws_planned   INTEGER NOT NULL DEFAULT 3,     -- 计划抽卡次数
     status          TEXT    NOT NULL DEFAULT 'pending',
                     -- pending | approved | rejected | final
-    -- 视频衔接：抽帧与续接（流程最后一段）
-    first_frame_path TEXT,                          -- 本镜的首帧图（多为上一镜的尾帧）
+    -- 首帧与衔接
+    keyframe_path    TEXT,                          -- 第 7 阶段生成的关键帧（出视频的锚点）
+    first_frame_path TEXT,                          -- 本镜实际用的首帧（续接时 = 上一镜尾帧）
     last_frame_path  TEXT,                          -- 本镜的尾帧图（供下一镜续接）
     continues_from   INTEGER REFERENCES shot(id) ON DELETE SET NULL,
                     -- 从哪个镜头的尾帧接过来；NULL = 本镜独立起头
