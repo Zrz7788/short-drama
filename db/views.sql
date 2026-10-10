@@ -19,6 +19,13 @@ CREATE INDEX IF NOT EXISTS idx_gen_status        ON generation(status);
 CREATE INDEX IF NOT EXISTS idx_gen_task          ON generation(task_id);
 CREATE INDEX IF NOT EXISTS idx_asset_gen         ON asset(generation_id);
 CREATE INDEX IF NOT EXISTS idx_cost_episode      ON cost_ledger(episode_id);
+CREATE INDEX IF NOT EXISTS idx_entity_project    ON entity(project_id);
+CREATE INDEX IF NOT EXISTS idx_entity_kind       ON entity(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_entity_ref_entity ON entity_ref(entity_id);
+CREATE INDEX IF NOT EXISTS idx_imagegen_entity   ON image_generation(entity_id);
+CREATE INDEX IF NOT EXISTS idx_imagegen_status   ON image_generation(status);
+CREATE INDEX IF NOT EXISTS idx_shot_entity_ent   ON shot_entity(entity_id);
+CREATE INDEX IF NOT EXISTS idx_shot_continues    ON shot(continues_from);
 
 -- ---------------------------------------------------------------- 视图
 DROP VIEW IF EXISTS v_episode_cost;
@@ -86,3 +93,47 @@ SELECT  model_id                                  AS 模型ID,
         COALESCE(source, '-')                     AS 来源
 FROM price_book
 ORDER BY model_id, variant, resolution;
+
+-- 实体参考图齐备度。用途：跑「定妆照」「三视图」两阶段时，
+-- 一眼看出哪些实体还缺图、缺哪个视角、有没有指定主参考图。
+DROP VIEW IF EXISTS v_entity_readiness;
+CREATE VIEW v_entity_readiness AS
+SELECT  en.id        AS entity_id,
+        en.kind      AS kind,               -- character / location / prop
+        en.name      AS name,
+        en.role      AS role,
+        COUNT(r.id)  AS refs,
+        SUM(CASE WHEN r.view = 'portrait'      THEN 1 ELSE 0 END) AS has_portrait,
+        SUM(CASE WHEN r.view = 'front'         THEN 1 ELSE 0 END) AS has_front,
+        SUM(CASE WHEN r.view = 'side'          THEN 1 ELSE 0 END) AS has_side,
+        SUM(CASE WHEN r.view = 'back'          THEN 1 ELSE 0 END) AS has_back,
+        SUM(CASE WHEN r.is_primary = 1         THEN 1 ELSE 0 END) AS has_primary,
+        SUM(CASE WHEN r.approved = 1           THEN 1 ELSE 0 END) AS approved_refs,
+        (SELECT COUNT(*) FROM shot_entity se WHERE se.entity_id = en.id) AS used_in_shots
+FROM entity en
+LEFT JOIN entity_ref r ON r.entity_id = en.id
+GROUP BY en.id;
+
+-- 管线各阶段进度。用途：整条流程的总看板——
+-- 剧本/场/镜头/提示词/抽帧/成片 六个阶段的完成量。
+DROP VIEW IF EXISTS v_pipeline_status;
+CREATE VIEW v_pipeline_status AS
+SELECT  e.id  AS episode_id,
+        e.seq AS episode_seq,
+        e.title,
+        e.status,
+        (SELECT COUNT(*) FROM script s
+          WHERE s.episode_id = e.id AND s.is_current = 1)                  AS scripts,
+        (SELECT COUNT(*) FROM scene sc JOIN script s ON s.id = sc.script_id
+          WHERE s.episode_id = e.id AND s.is_current = 1)                  AS scenes,
+        (SELECT COUNT(*) FROM shot WHERE episode_id = e.id)                AS shots,
+        (SELECT COUNT(*) FROM shot
+          WHERE episode_id = e.id AND prompt IS NOT NULL AND prompt <> '') AS shots_with_prompt,
+        (SELECT COUNT(*) FROM shot
+          WHERE episode_id = e.id
+            AND (first_frame_path IS NOT NULL OR last_frame_path IS NOT NULL))
+                                                                           AS shots_with_frames,
+        (SELECT COUNT(DISTINCT g.shot_id) FROM generation g
+           JOIN shot sh ON sh.id = g.shot_id
+          WHERE sh.episode_id = e.id AND g.status = 'succeeded')           AS shots_with_video
+FROM episode e;

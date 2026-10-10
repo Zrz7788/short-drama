@@ -47,6 +47,73 @@ CREATE TABLE IF NOT EXISTS character (
     UNIQUE (project_id, name)
 );
 
+-- ---------------------------------------------------------------- 统一实体（人物 / 场景 / 道具）
+-- 为什么合成一张表：在本项目的流程里这三者待遇完全相同——都要定妆照、
+-- 都要三视图、都会被镜头引用。拆成三张表会让后续每一段脚本都写三遍同样的逻辑。
+--
+-- ⚠️ 命名区分（重要）：
+--     entity(kind='location') = 场景资产，即"布景"，要出定妆照和三视图的那个
+--     scene 表                = 剧本的"场"，是剧作结构（第几场、什么 beat、多长）
+--   两者同名不同物，勿混。
+CREATE TABLE IF NOT EXISTS entity (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    kind        TEXT    NOT NULL CHECK (kind IN ('character','location','prop')),
+    name        TEXT    NOT NULL,
+    alias       TEXT,                    -- 剧本里的其他叫法，供自动提取时匹配
+    role        TEXT,                    -- 主要 / 次要 / 背景
+    description TEXT,                    -- 可整段粘进 prompt 的外观描述块
+    style_note  TEXT,                    -- 材质、年代、色调等美术约束
+    voice_id    TEXT,                    -- 仅人物有意义
+    notes       TEXT,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE (project_id, kind, name)
+);
+
+-- ---------------------------------------------------------------- 图片生成任务（与 generation 表对称）
+-- generation 记视频调用，本表记图片调用。
+-- 刻意不复用 generation：它的 shot_id 是 NOT NULL，且带 duration_s / is_draft 等
+-- 视频专属字段；SQLite 无法把 NOT NULL 改成可空，重建表的代价高于新建对称表。
+CREATE TABLE IF NOT EXISTS image_generation (
+    id             INTEGER PRIMARY KEY,
+    entity_id      INTEGER REFERENCES entity(id) ON DELETE SET NULL,
+    view           TEXT,                 -- 本次要出的视角
+    model_id       TEXT    NOT NULL,
+    prompt         TEXT,
+    size           TEXT,                 -- 1K / 2K / 4K
+    seed           INTEGER,
+    ref_image_path TEXT,                 -- 图生图时的输入参考
+    task_id        TEXT,
+    status         TEXT    NOT NULL DEFAULT 'queued',
+                   -- queued | running | succeeded | failed | cancelled | expired
+    image_url      TEXT,
+    local_path     TEXT,
+    error          TEXT,
+    cost           REAL    NOT NULL DEFAULT 0,
+    submitted_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    finished_at    TEXT
+);
+
+-- ---------------------------------------------------------------- 实体参考图（定妆照 + 三视图 + 其他角度）
+-- 对应流程的两个阶段：「生成定妆照」产出 view='portrait'，
+-- 「生成三视图」产出 front / side / back。
+CREATE TABLE IF NOT EXISTS entity_ref (
+    id           INTEGER PRIMARY KEY,
+    entity_id    INTEGER NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
+    view         TEXT    NOT NULL,
+                 -- portrait(定妆照) | front/side/back(三视图)
+                 -- | three_quarter | wide | detail
+    path         TEXT,
+    image_gen_id INTEGER REFERENCES image_generation(id) ON DELETE SET NULL,
+    seed         INTEGER,
+    prompt       TEXT,
+    is_primary   INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0,1)),
+    approved     INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0,1)),
+    notes        TEXT,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE (entity_id, view)
+);
+
 -- ---------------------------------------------------------------- 集
 CREATE TABLE IF NOT EXISTS episode (
     id             INTEGER PRIMARY KEY,
@@ -106,11 +173,26 @@ CREATE TABLE IF NOT EXISTS shot (
     prompt          TEXT,                           -- 视频提示词
     negative_prompt TEXT,
     char_id         INTEGER REFERENCES character(id) ON DELETE SET NULL,
+                    -- 已弃用：改用 shot_entity 关联表（一个镜头常同时含人物+布景+道具）
     strategy        TEXT    NOT NULL DEFAULT 'draft',   -- draft | direct
     draws_planned   INTEGER NOT NULL DEFAULT 3,     -- 计划抽卡次数
     status          TEXT    NOT NULL DEFAULT 'pending',
                     -- pending | approved | rejected | final
+    -- 视频衔接：抽帧与续接（流程最后一段）
+    first_frame_path TEXT,                          -- 本镜的首帧图（多为上一镜的尾帧）
+    last_frame_path  TEXT,                          -- 本镜的尾帧图（供下一镜续接）
+    continues_from   INTEGER REFERENCES shot(id) ON DELETE SET NULL,
+                    -- 从哪个镜头的尾帧接过来；NULL = 本镜独立起头
     UNIQUE (episode_id, seq)
+);
+
+-- ---------------------------------------------------------------- 镜头 ↔ 实体（多对多）
+-- 一个镜头通常同时含人物 + 布景 + 道具，所以不做外键而做关联表。
+CREATE TABLE IF NOT EXISTS shot_entity (
+    shot_id   INTEGER NOT NULL REFERENCES shot(id) ON DELETE CASCADE,
+    entity_id INTEGER NOT NULL REFERENCES entity(id) ON DELETE CASCADE,
+    role      TEXT,          -- subject(主体) / background(背景) / prop(道具)
+    PRIMARY KEY (shot_id, entity_id)
 );
 
 -- ---------------------------------------------------------------- 生成任务

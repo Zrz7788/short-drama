@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -42,16 +42,24 @@ SCHEMA_VERSION = 2
 COLUMN_MIGRATIONS = [
     ("shot", "scene_id",
      "ALTER TABLE shot ADD COLUMN scene_id INTEGER REFERENCES scene(id)"),
+    # 视频衔接所需：抽帧路径与续接关系
+    ("shot", "first_frame_path",
+     "ALTER TABLE shot ADD COLUMN first_frame_path TEXT"),
+    ("shot", "last_frame_path",
+     "ALTER TABLE shot ADD COLUMN last_frame_path TEXT"),
+    ("shot", "continues_from",
+     "ALTER TABLE shot ADD COLUMN continues_from INTEGER"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表
 DOMAINS = {
     "剧本":     ["script", "scene"],
     "集":       ["episode"],
-    "镜头":     ["shot"],
+    "镜头":     ["shot", "shot_entity"],
     "素材":     ["asset"],
-    "生成任务": ["generation"],
+    "生成任务": ["generation", "image_generation"],
     "成本":     ["cost_ledger", "price_book"],
+    "实体":     ["entity", "entity_ref"],
 }
 
 

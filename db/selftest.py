@@ -138,6 +138,87 @@ def main():
         # 单集成本应还原知识库里的 ¥178.4
         check("与知识库单集成本对齐", r["shot_seconds"] and VIDEO_TOTAL, 178.40)
 
+        # ---------------- 实体 / 参考图 / 衔接 管线 ----------------
+        print("\n--- 实体与参考图管线验算 ---")
+        ents = {}
+        for kind, name in [("character", "女主"), ("character", "男主"),
+                           ("location", "客厅"), ("prop", "照片")]:
+            ents[name] = con.execute(
+                "INSERT INTO entity (project_id, kind, name, description) "
+                "VALUES (?,?,?,?)",
+                (pid, kind, name, "%s 的外观描述块" % name)).lastrowid
+        check("实体数（人物2+布景1+道具1）", len(ents), 4)
+
+        # 每个实体先出定妆照；只有女主出全三视图
+        full_views = ["portrait", "front", "side", "back"]
+        ref_images = 0
+        for name, ent_id in ents.items():
+            for v in (full_views if name == "女主" else ["portrait"]):
+                gid = con.execute(
+                    "INSERT INTO image_generation (entity_id, view, model_id, size,"
+                    " status, cost) VALUES (?,?,?,?,'succeeded',?)",
+                    (ent_id, v, "doubao-seedream-4-0-250828", "2K", IMAGE_PRICE)
+                ).lastrowid
+                con.execute(
+                    "INSERT INTO cost_ledger (category, model_id, quantity, unit,"
+                    " unit_price, amount, episode_id) "
+                    "VALUES ('image',?,1,'image',?,?,?)",
+                    ("doubao-seedream-4-0-250828", IMAGE_PRICE, IMAGE_PRICE, eid))
+                con.execute(
+                    "INSERT INTO entity_ref (entity_id, view, path, image_gen_id,"
+                    " is_primary, approved) VALUES (?,?,?,?,?,1)",
+                    (ent_id, v, "assets/refs/%s_%s.png" % (name, v), gid,
+                     1 if v == "portrait" else 0))
+                ref_images += 1
+        check("参考图总数（4定妆 + 3三视图）", ref_images, 7)
+
+        # 前 5 个镜头挂实体（女主为主体，客厅为背景）
+        for sh in shot_ids[:5]:
+            con.execute("INSERT INTO shot_entity (shot_id, entity_id, role) "
+                        "VALUES (?,?,'subject')", (sh, ents["女主"]))
+            con.execute("INSERT INTO shot_entity (shot_id, entity_id, role) "
+                        "VALUES (?,?,'background')", (sh, ents["客厅"]))
+
+        # 视频衔接：第 1 镜抽尾帧，第 2 镜用它作首帧并声明续接
+        con.execute("UPDATE shot SET last_frame_path='assets/frames/S01_last.png' "
+                    "WHERE id=?", (shot_ids[0],))
+        con.execute("UPDATE shot SET first_frame_path='assets/frames/S01_last.png', "
+                    "continues_from=? WHERE id=?", (shot_ids[0], shot_ids[1]))
+
+        def view_row(view, where, param):
+            cur = con.execute("SELECT * FROM %s WHERE %s" % (view, where), (param,))
+            cols = [d[0] for d in con.execute(
+                "SELECT * FROM %s LIMIT 0" % view).description]
+            return dict(zip(cols, cur.fetchone()))
+
+        r = view_row("v_entity_readiness", "name=?", "女主")
+        check("女主 refs 数", r["refs"], 4)
+        check("女主 三视图齐备(前+侧+后)",
+              r["has_front"] + r["has_side"] + r["has_back"], 3)
+        check("女主 有主参考图", r["has_primary"], 1)
+        check("女主 被镜头引用数", r["used_in_shots"], 5)
+
+        r = view_row("v_entity_readiness", "name=?", "客厅")
+        check("客厅 refs 数（只出了定妆照）", r["refs"], 1)
+        check("客厅 has_front（应为 0）", r["has_front"], 0)
+        check("客厅 被镜头引用数", r["used_in_shots"], 5)
+
+        r = view_row("v_entity_readiness", "name=?", "照片")
+        check("道具 未被任何镜头引用", r["used_in_shots"], 0)
+
+        r = view_row("v_pipeline_status", "episode_id=?", eid)
+        check("管线·场数", r["scenes"], len(BEATS))
+        check("管线·镜头数", r["shots"], SHOTS)
+        check("管线·有提示词的镜头", r["shots_with_prompt"], SHOTS)
+        check("管线·已抽帧的镜头", r["shots_with_frames"], 2)
+        check("管线·已成片的镜头", r["shots_with_video"], SHOTS)
+
+        # 参考图的成本必须也进了流水
+        total = con.execute("SELECT SUM(amount) FROM cost_ledger WHERE episode_id=?",
+                            (eid,)).fetchone()[0]
+        check("参考图成本已入流水", total,
+              VIDEO_TOTAL + IMAGE_TOTAL + ref_images * IMAGE_PRICE)
+
     finally:
         con.execute("ROLLBACK")
         left = con.execute("SELECT COUNT(*) FROM project").fetchone()[0]
