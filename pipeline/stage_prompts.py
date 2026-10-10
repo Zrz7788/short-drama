@@ -57,9 +57,11 @@ def build(shot, ents):
     # 运镜拼成一行：情绪化命名（命名）+ 基底运镜 + 速度 + 防崩坏说明。
     # 依据《运镜与分镜规范》：同一个"推"，写成"聚焦式推进"就同时是动作描述
     # 和情绪指令；速度必须带数字；防崩坏说明显式排除糊/畸变/抖动/重影。
-    cam_bits = [x for x in ((shot["camera_emotion"] or "").strip(),
-                            (shot["camera_move"] or "").strip()) if x]
-    cam = "".join(cam_bits) if cam_bits else "固定"
+    # 情绪化命名已经含了动作（"聚焦式推进"里就有"推"），再拼一次基底运镜
+    # 会变成"聚焦式推进推"这种重复。所以：有情绪化命名就用它，没有才退回基底运镜。
+    emo = (shot["camera_emotion"] or "").strip()
+    base = (shot["camera_move"] or "").strip()
+    cam = emo or base or "固定"
     if (shot["movement_speed"] or "").strip():
         cam += "，%s" % shot["movement_speed"].strip()
     if (shot["camera_lock"] or "").strip():
