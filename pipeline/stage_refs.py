@@ -4,8 +4,9 @@
 两个阶段共用一个脚本，用 --phase 区分——它们的流程完全相同，只是
 「给谁出图」和「出哪些视角」不同：
 
-  第 3 阶段  --phase portrait    定妆照。给 main + secondary 出，视角 portrait
-  第 4 阶段  --phase turnaround  三视图。**只给 main 出**，视角 front/side/back
+  第 3 阶段  --phase characters  人物素材：大头照 + 全身照
+  第 4 阶段  --phase scenes      场景素材：正视图 + 俯视图 + 站位图
+             --phase props       道具素材
 
 分级的成本含义：main 出 4 张、secondary 出 1 张、background 出 0 张。
 
@@ -13,10 +14,10 @@
 三个角度是同一个实体。定妆照是锚点，三视图从锚点长出来。
 
 用法：
-  python pipeline/stage_refs.py --episode-id 1 --phase portrait
-  python pipeline/stage_refs.py --episode-id 1 --phase turnaround
-  python pipeline/stage_refs.py --episode-id 1 --phase portrait --dry-run
-  python pipeline/stage_refs.py --episode-id 1 --phase portrait --only 林薇 --force
+  python pipeline/stage_refs.py --episode-id 1 --phase characters
+  python pipeline/stage_refs.py --episode-id 1 --phase scenes
+  python pipeline/stage_refs.py --episode-id 1 --phase characters --dry-run
+  python pipeline/stage_refs.py --episode-id 1 --phase characters --only 林薇 --force
 """
 import argparse
 import os
@@ -28,17 +29,85 @@ from pipeline import ark as A  # noqa: E402
 from pipeline import common as C  # noqa: E402
 from pipeline import llm as L  # noqa: E402
 
-PORTRAIT_TPL = os.path.join(C.ROOT, "pipeline", "prompts", "portrait.md")
-TURNAROUND_TPL = os.path.join(C.ROOT, "pipeline", "prompts", "turnaround.md")
+TPL = os.path.join(C.ROOT, "pipeline", "prompts", "portrait.md")
 
-TURNAROUND_VIEWS = [
-    ("front", "正面", "正对镜头的正面视角，左右对称，双眼平视前方。"),
-    ("side", "正侧面", "严格 90 度侧视角，鼻尖朝向画面一侧，只见单侧脸。"),
-    ("back", "正背面", "背对镜头的正背面视角，只见后脑与背部。"),
-]
+# ------------------------------------------------------------------ 素材体系
+#
+# ⚠️ **这里做过一次重构。** 原来第 4 阶段出 front/side/back「三视图」，
+# 依据用户提供的《拾音人第一集》工艺规范，那是**官方明确禁止**的做法：
+#
+#   ❌ 禁止使用人物三视图或多视图作为参考素材——官方明确会导致模型识别为
+#      多个不同主体，**直接引发"双胞胎问题"**。
+#
+# 三个独立来源指向同一件事（OpenMontage「脸只出现在一张上」、《真人质感》
+# 「把脸部视图与全身图分开」、拾音人「直接禁用三视图」）。
+#
+# 重构后的体系把**人物与场景分开**——它们本来就是两种不同的参考物：
+#
+#   人物（每 main 角色 2 张）
+#     headshot  大头照：仅面部、无表情、无肩颈、无背景、正面平光、高清。
+#               用途是**锁死面部细节**；面部大特写镜**只加载这一张**。
+#     fullbody  全身照：完整妆造，部件级（内层/外层/下装/鞋/配饰）。
+#               用途是**妆造与体态参考**。
+#
+#   场景（每个 location）
+#     scene_front  正视图：环境本身
+#     blocking     站位图：颜色标记人偶 + 位置说明，用于空间调度
+#     scene_top    俯视图：空间关系（只给需要走位调度的核心场景）
+#
+# 提示词里的引用分工（照《拾音人》规范）：
+#   「面部特征参考图片1（大头照），妆造参考图片2（全身照）」
+#   且 **@图片1 必须放在提示词最开头**。
 
-# 各阶段给哪些 tier 出图（与 knowledge/01-制作方法 的分级一致）
-PHASE_TIERS = {"portrait": ("main", "secondary"), "turnaround": ("main",)}
+HEADSHOT = ("headshot", "大头照",
+            "仅面部特写，正面平视镜头，**不出现肩颈与以下部位，不出现背景**，"
+            "中性无表情，正面均匀平光（无侧光、无轮廓光、无阴影），"
+            "背景纯白，超高清，皮肤纹理与毛孔清晰可见。")
+FULLBODY = ("fullbody", "全身照",
+            "完整全身照，正面站立，完整展示内层衣物、外层衣物、下装、鞋履与"
+            "全部配饰；四肢完整入镜，不裁切；自然站姿，平视机位，"
+            "柔和均匀照明，中性表情。")
+
+SCENE_FRONT = ("scene_front", "场景正视图",
+               "正面平视视角的完整场景，无人物，自然光照，"
+               "空间结构与纵深清楚。")
+SCENE_TOP = ("scene_top", "场景俯视图",
+             "约 30 度俯视视角的完整场景，无人物，"
+             "清楚交代空间布局、通道走向与家具摆位。")
+BLOCKING = ("blocking", "站位图",
+            "在场景图上用**半透明白膜人偶**标出人物站位，"
+            "每个人偶旁标注编号与角色名，用**明显不同的颜色**区分人偶，"
+            "人偶为纯白无贴图模型（不显示五官与服装细节）。"
+            "此图仅作站位参考。")
+
+# 人物素材：main 出两张，secondary 只出全身照（不会有面部大特写）
+CHARACTER_VIEWS = {
+    "main": [HEADSHOT, FULLBODY],
+    "secondary": [FULLBODY],
+    "background": [],
+}
+# 场景素材：核心场景出三张，一次性场景只出正视图
+SCENE_VIEWS = {
+    "main": [SCENE_FRONT, BLOCKING, SCENE_TOP],
+    "secondary": [SCENE_FRONT, BLOCKING],
+    "background": [],
+}
+
+# 工具素材（道具）：一张即可
+PROP_VIEW = ("prop_ref", "道具参考图",
+             "道具的清晰孤立照片，纯白背景，正面视角，"
+             "材质、磨损、颜色与尺寸比例清楚可辨。")
+
+# 每个实体类型的**主参考图**（标记 is_primary=1）。
+# 选"第一个生成的那张"：人物是全身照（大头照以它为参考），
+# 场景是正视图（俯视图以它为参考），道具只有一张。
+PRIMARY_VIEW = {"character": "fullbody", "location": "scene_front",
+                "prop": "prop_ref"}
+
+# 各阶段给哪些 tier 出图
+PHASE_TIERS = {"characters": ("main", "secondary"),
+               "scenes": ("main", "secondary"),
+               "props": ("main", "secondary")}
 
 
 def entity_block(e):
@@ -48,13 +117,18 @@ def entity_block(e):
     return "【%s·%s】%s" % (e["kind"], e["name"], body)
 
 
-def build_portrait_prompt(e):
-    return L.load_prompt(PORTRAIT_TPL, entity_block=entity_block(e))
+def build_view_prompt(e, view_name, view_desc):
+    """按素材类型组装提示词。
 
-
-def build_turnaround_prompt(e, view_name, view_desc):
-    return L.load_prompt(TURNAROUND_TPL, entity_block=entity_block(e),
-                         view_name=view_name, view_desc=view_desc)
+    人物用 portrait.md 模板（含"真人质感"混搭与妆造部件级描述），
+    场景/道具复用同一模板但换掉视角说明——它们的差别主要在视角描述上。
+    """
+    return L.load_prompt(
+        TPL,
+        entity_block=entity_block(e),
+        view_name=view_name,
+        view_desc=view_desc,
+    )
 
 
 def image_unit_price(con, model_id):
@@ -118,7 +192,7 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
         " VALUES (?,?,?,?,?,0) "
         "ON CONFLICT(entity_id, view) DO UPDATE SET path=excluded.path, "
         "image_gen_id=excluded.image_gen_id",
-        (e["id"], view, rel, gid, 1 if view == "portrait" else 0))
+        (e["id"], view, rel, gid, 1 if view == PRIMARY_VIEW.get(e["kind"]) else 0))
     con.execute(
         "INSERT INTO cost_ledger (category, model_id, quantity, unit, unit_price,"
         " amount, note) VALUES ('image',?,1,'image',?,?,?)",
@@ -135,7 +209,7 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
 def main():
     ap = argparse.ArgumentParser(description="第 3/4 阶段：生成参考图")
     ap.add_argument("--episode-id", type=int, required=True)
-    ap.add_argument("--phase", choices=("portrait", "turnaround"), required=True)
+    ap.add_argument("--phase", choices=("characters", "scenes", "props"), required=True)
     ap.add_argument("--only", default=None, help="只处理某个实体名")
     ap.add_argument("--include-background", action="store_true",
                     help="连 background 级实体也出图（默认不出）")
@@ -153,7 +227,9 @@ def main():
         print("找不到集:", args.episode_id)
         return 2
 
-    label = "第 3 阶段 · 定妆照" if args.phase == "portrait" else "第 4 阶段 · 三视图"
+    label = {"characters": "第 3 阶段 · 人物素材（大头照 + 全身照）",
+             "scenes": "第 4 阶段 · 场景素材（正视图 + 俯视图 + 站位图）",
+             "props": "第 4 阶段 · 道具素材"}[args.phase]
     rep = C.Report(label)
     print("集：第 %s 集 项目：%s\n" % (ep["seq"], ep["project"]))
 
@@ -182,9 +258,31 @@ def main():
     cfg["base_url"] = args.base_url or cfg["base_url"]
     cfg["image_model"] = args.image_model or cfg["image_model"]
 
-    views = [("portrait",)] if args.phase == "portrait" else TURNAROUND_VIEWS
     rep.info("模型：%s　size：%s　tier：%s　实体数：%d"
              % (cfg["image_model"], args.size, "/".join(tiers), len(ents)))
+
+    def views_for(e):
+        """这个实体该出哪些素材。人物与场景用两套体系（见文件头的重构说明）。"""
+        if e["kind"] == "character":
+            return CHARACTER_VIEWS.get(e["role"], [])
+        if e["kind"] == "location":
+            return SCENE_VIEWS.get(e["role"], [])
+        if e["kind"] == "prop":
+            return [PROP_VIEW] if e["role"] in ("main", "secondary") else []
+        return []
+
+    def ref_for(e, view):
+        """给某个视角找参考图（i2i）。
+
+        依据《真人质感》：**先用 i2i 生成半身/全身图，再据它生成脸部视图**，
+        能更好地控制人脸。所以全身照在前、大头照以它为参考。
+        场景的俯视图以正视图为参考，保持同一空间。
+        """
+        if e["kind"] == "character" and view == "headshot":
+            return have.get((e["id"], "fullbody"))
+        if e["kind"] == "location" and view in ("scene_top", "blocking"):
+            return have.get((e["id"], "scene_front"))
+        return None
 
     # 已有参考图检查
     have = {}
@@ -193,20 +291,15 @@ def main():
 
     price = image_unit_price(con, cfg["image_model"])
     planned = 0
+    # 全身照排在大头照之前——大头照要以它为参考图（见 ref_for 的说明）
+    def ordered(e):
+        vs = views_for(e)
+        return sorted(vs, key=lambda v: 0 if v[0] != "headshot" else 1)
+
     for e in ents:
-        need = []
-        if args.phase == "portrait":
-            if args.force or not have.get((e["id"], "portrait")):
-                need.append("portrait")
-        else:
-            if not have.get((e["id"], "portrait")):
-                rep.info("跳过 %s：没有定妆照，三视图缺锚点，先跑 --phase portrait"
-                         % e["name"])
-                continue
-            for v, _n, _d in TURNAROUND_VIEWS:
-                if args.force or not have.get((e["id"], v)):
-                    need.append(v)
-        planned += len(need)
+        for v, _n, _d in ordered(e):
+            if args.force or not have.get((e["id"], v)):
+                planned += 1
 
     rep.add("待生成张数", True, "%d 张%s" % (planned, "（dry-run）" if args.dry_run else ""))
     if price is not None:
@@ -238,25 +331,18 @@ def main():
 
     ok = True
     for e in ents:
-        if args.phase == "portrait":
-            if args.force or not have.get((e["id"], "portrait")):
-                ok &= do_one(con, cfg, ep, e, "portrait",
-                             build_portrait_prompt(e), None, args.size,
-                             args.dry_run, rep, "定妆照")
-        else:
-            if not have.get((e["id"], "portrait")):
+        for v, vn, vd in ordered(e):
+            if not (args.force or not have.get((e["id"], v))):
                 continue
-            ref = have[(e["id"], "portrait")]
-            if not os.path.exists(C.abs_path(ref)):
-                rep.add("三视图 %s" % e["name"], False,
-                        "定妆照文件不存在：%s" % ref)
-                ok = False
+            ref = ref_for(e, v)
+            if v == "headshot" and not ref:
+                rep.info("跳过 %s 的大头照：没有全身照可作参考（先跑同一阶段，"
+                         "全身照会先出）" % e["name"])
                 continue
-            for v, vn, vd in TURNAROUND_VIEWS:
-                if args.force or not have.get((e["id"], v)):
-                    ok &= do_one(con, cfg, ep, e, v,
-                                 build_turnaround_prompt(e, vn, vd),
-                                 ref, args.size, args.dry_run, rep, "三视图·" + vn)
+            ok &= do_one(con, cfg, ep, e, v,
+                         build_view_prompt(e, vn, vd),
+                         ref, args.size, args.dry_run, rep,
+                         "%s·%s" % (e["name"], vn))
 
     if not args.dry_run:
         n = con.execute(

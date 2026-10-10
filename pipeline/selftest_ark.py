@@ -238,7 +238,7 @@ def main():
     # ---- 3. 定妆照 ----
     print("\n=== 3. 第 3 阶段 --phase portrait ===")
     Handler.requests.clear()
-    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "portrait"], base)
+    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"], base)
     rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
     if p.returncode:
         print("\n".join(p.stdout.strip().splitlines()[-14:]))
@@ -288,7 +288,7 @@ def main():
     # ---- 4. 三视图 ----
     print("\n=== 4. 第 4 阶段 --phase turnaround ===")
     Handler.requests.clear()
-    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround"], base)
+    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes"], base)
     rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
     if p.returncode:
         print("\n".join(p.stdout.strip().splitlines()[-14:]))
@@ -309,7 +309,7 @@ def main():
     con = C.connect(TEST_DB)
     views = dict(con.execute("SELECT view, COUNT(*) FROM entity_ref GROUP BY view").fetchall())
     rep.add("视角分布正确",
-            views.get("portrait") == want_portrait and views.get("front") == n_main
+            views.get("characters") == want_portrait and views.get("front") == n_main
             and views.get("side") == n_main and views.get("back") == n_main,
             " ".join("%s=%d" % kv for kv in sorted(views.items())))
     prim = con.execute("SELECT COUNT(*) FROM entity_ref WHERE is_primary=1").fetchone()[0]
@@ -323,13 +323,13 @@ def main():
     # ---- 5. 幂等：重跑不应重复出图 ----
     print("\n=== 5. 重跑应幂等（不重复出图）===")
     Handler.requests.clear()
-    run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "portrait"], base)
+    run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"], base)
     rep.add("没有发起新请求", len(Handler.requests) == 0, "%d 次" % len(Handler.requests))
 
     # ---- 6. --force 应重出 ----
     print("\n=== 6. --force 应重新生成 ===")
     Handler.requests.clear()
-    run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "portrait",
+    run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters",
                "--force"], base)
     rep.add("发起了 %d 次请求" % want_portrait,
             len(Handler.requests) == want_portrait, "%d 次" % len(Handler.requests))
@@ -563,7 +563,7 @@ def main():
     # ---- 9. 401 鉴权失败 ----
     print("\n=== 9. 401 应提示检查 key 与模型权限 ===")
     Handler.state["mode"] = "401"
-    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
+    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
                    "--force", "--only", "林薇"], base)
     blob = p.stdout + p.stderr
     rep.add("退出码非 0", p.returncode != 0)
@@ -574,7 +574,7 @@ def main():
     # ---- 8. 响应结构不符预期 ----
     print("\n=== 10. 响应结构不符预期时应给出可读错误 ===")
     Handler.state["mode"] = "bad_shape"
-    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
+    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
                    "--force", "--only", "林薇"], base)
     blob = p.stdout + p.stderr
     rep.add("退出码非 0", p.returncode != 0)
@@ -591,7 +591,7 @@ def main():
     Handler.state["mode"] = "429"
     Handler.state["n429"] = 0
     Handler.requests.clear()
-    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
+    p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes",
                    "--force", "--only", "林薇"], base)
     rep.add("退出码 0（重试后成功）", p.returncode == 0, C.tail(p.stderr, 50))
     rep.add("确实发生了 ≥2 次请求（含被限流那次）",
@@ -605,7 +605,7 @@ def main():
     env.pop("ARK_API_KEY", None)
     p = subprocess.run([sys.executable, "-X", "utf8",
                         os.path.join(C.ROOT, "pipeline", "stage_refs.py"),
-                        "--episode-id", str(eid), "--db", TEST_DB, "--phase", "portrait"],
+                        "--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"],
                        cwd=C.ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=env)
     blob = p.stdout + p.stderr

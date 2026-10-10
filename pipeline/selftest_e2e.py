@@ -144,17 +144,17 @@ def main():
 
     print("\n=== 3-4. 定妆照 → 三视图（Ark 图像阶段）===")
     stage(rep, "第 3 阶段 定妆照", "stage_refs.py",
-          ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "portrait"],
+          ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"],
           llm_base, ark_base)
     stage(rep, "第 4 阶段 三视图", "stage_refs.py",
-          ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround"],
+          ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes"],
           llm_base, ark_base)
     con = C.connect(TEST_DB)
     views = dict(con.execute("SELECT view, COUNT(*) FROM entity_ref GROUP BY view").fetchall())
     n_main = con.execute("SELECT COUNT(*) FROM entity WHERE role='main'").fetchone()[0]
     rep.add("参考图视角齐备",
             views.get("front") == n_main and views.get("side") == n_main
-            and views.get("back") == n_main and views.get("portrait", 0) >= n_main,
+            and views.get("back") == n_main and views.get("characters", 0) >= n_main,
             " ".join("%s=%d" % kv for kv in sorted(views.items())))
     bg = con.execute("SELECT COUNT(*) FROM entity_ref r JOIN entity e ON e.id=r.entity_id "
                      "WHERE e.role='background'").fetchone()[0]
