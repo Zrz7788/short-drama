@@ -169,5 +169,75 @@
     "warnings": [
       "没有出处 URL（可信度无法追溯）"
     ]
+  },
+  "short-drama-write": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/short-drama-write",
+    "license": "AGPL-3.0",
+    "files": 19,
+    "bytes": 226149,
+    "extras": [],
+    "description": "编写或修订可拍摄的中文短剧、漫剧单集 Markdown 剧本，也负责保留作者原文地规范化现成剧本。用户提出“写/改一集短剧”“把大纲写成剧本”“优化场景/对白”“去模板感”“去 AI 味润色”“续写下一集”或提供剧本要求进入后续制作时使用；不负责资产、分镜、媒体提示词或终审。",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
+  },
+  "short-drama-storyboard": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/short-drama-storyboard",
+    "license": "AGPL-3.0",
+    "files": 23,
+    "bytes": 181981,
+    "extras": [],
+    "description": "把中文短剧剧本和视觉设定写成有戏剧职责、连续性边界与冻结关键帧提示词的分镜 Markdown。用户提出“拆分镜/设计镜头/做镜头表”“场次视觉计划/调度故事板”“比较导演方案”“写首帧/关键帧提示词”或检查轴线、站位、视线、持物连续性时使用；不生成媒体。",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
+  },
+  "short-drama-image-prompts": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/short-drama-image-prompts",
+    "license": "AGPL-3.0",
+    "files": 19,
+    "bytes": 117227,
+    "extras": [],
+    "description": "为短剧人物、造型、地点、道具和状态编写或修改可直接复制的图片提示词 Markdown。用户提到角色设定图、三视图、参考图、场景板、道具图、风格帧、Look Development、状态变体或局部编辑提示词时使用；不生成图片，也不调用供应商。",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
+  },
+  "short-drama-video-prompts": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/short-drama-video-prompts",
+    "license": "AGPL-3.0",
+    "files": 27,
+    "bytes": 258909,
+    "extras": [],
+    "description": "把短剧分镜和冻结关键帧写成可直接复制的视频提示词 Markdown，也可按用户要求写时间线配乐/主题曲意图。用户提到文生/图生视频动作、人物表演、运镜、口型、环境运动、镜头时长、起止状态、把分镜转成视频提示词或写配乐提示词时使用；不生成媒体、不创作歌词、不改分镜边界。",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
+  },
+  "short-drama-assets": {
+    "source": "github.com/calesthio/OpenMontage",
+    "path": ".agents/skills/short-drama-assets",
+    "license": "AGPL-3.0",
+    "files": 23,
+    "bytes": 112812,
+    "extras": [],
+    "description": "从短剧剧本拆出人物/造型、地点/视图、道具/状态和跨场连续性，写成创作者可读的视觉设定。用户说“拆角色/场景/道具”“做资产设定”“判断复用还是新变体”“更新造型/道具状态”，或拿现成剧本直接做视觉资产准备时使用；不写图片提示词，不生成媒体。",
+    "warnings": [
+      "没有出处 URL（可信度无法追溯）",
+      "没有「陷阱」小节",
+      "没有表格（结构化信息少）"
+    ]
   }
 }
