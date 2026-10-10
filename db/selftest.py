@@ -48,6 +48,7 @@ def main():
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA foreign_keys = ON")
     con.isolation_level = None
+    BEFORE = con.execute("SELECT COUNT(*) FROM project").fetchone()[0]  # 开工前基线
     con.execute("BEGIN")
 
     try:
@@ -222,8 +223,13 @@ def main():
     finally:
         con.execute("ROLLBACK")
         left = con.execute("SELECT COUNT(*) FROM project").fetchone()[0]
-        print("\n  回滚后 project 行数: %d（应为 0，证明未污染生产数据）" % left)
-        checks.append(left == 0)
+        # 原断言是"回滚后应为 0"。那假设了生产库为空——但生产库本来就该有
+        # 真实作品，第一次真跑之后它必然失败（实测）。
+        # 真正要证的是"回滚把自检插的数据都撤销了"，所以跟开工前的行数比。
+        ok_left = (left == BEFORE)
+        print("\n  回滚后 project 行数: %d（开工前 %d）—— %s"
+              % (left, BEFORE, "未污染生产数据" if ok_left else "**有残留**"))
+        checks.append(ok_left)
         con.close()
 
     ok = all(checks)
