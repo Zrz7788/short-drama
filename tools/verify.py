@@ -96,7 +96,15 @@ def check_git():
         rc, _ = git("check-ignore", "-q", p)
         ok("git", "已被忽略: %s" % p, rc == 0)
 
-    # 仓库内不得出现疑似密钥
+    # 仓库内不得出现疑似密钥。
+    # 注意：PEM 头必须由片段拼出来——否则本文件自身就会包含那串字面量，
+    # 扫描器会抓到自己（实测踩过）。跳过自身会留下盲区，拼接则不会。
+    secret_patterns = [
+        r"sk-[A-Za-z0-9]{16,}",
+        r"ARK_API_KEY\s*=\s*['\"]?[A-Za-z0-9\-_]{12,}",
+        re.escape("-----BEGIN OPENSSH " + "PRIVATE KEY-----"),
+        re.escape("-----BEGIN RSA " + "PRIVATE KEY-----"),
+    ]
     suspicious = []
     for f in files:
         if not f.endswith((".md", ".py", ".sql", ".yml", ".yaml", ".json", ".txt")):
@@ -106,12 +114,12 @@ def check_git():
             text = open(full, encoding="utf-8", errors="ignore").read()
         except OSError:
             continue
-        for pat in (r"sk-[A-Za-z0-9]{16,}", r"ARK_API_KEY\s*=\s*['\"]?[A-Za-z0-9\-_]{12,}",
-                    r"BEGIN OPENSSH PRIVATE KEY"):
+        for pat in secret_patterns:
             if re.search(pat, text):
-                suspicious.append("%s ~ %s" % (f, pat))
+                suspicious.append(f)
+                break
     ok("git", "跟踪文件中无明文密钥", not suspicious,
-       "" if not suspicious else suspicious[0][:70])
+       "" if not suspicious else "命中: %s" % suspicious[:3])
 
 
 def check_knowledge():
