@@ -18,9 +18,14 @@ db/                 数据库
   export.py           导出纯文本 SQL 便于进 git
 pipeline/           管线阶段脚本
   common.py           共用层：路径、数据库连接、ffmpeg 调用
+  llm.py              LLM 共用层：OpenAI 兼容调用、JSON 抽取、结构校验
+  prompts/            提示词模板（script.md、entities.md）
+  stage_script.py     第 1 阶段：生成剧本（含版本管理）
+  stage_entities.py   第 2 阶段：提取人物/场景/道具并分级
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
   assemble.py         第 10 阶段：拼接成集、可选烧字幕
   selftest.py         管线端到端自检（合成素材 + 临时库）
+  selftest_llm.py     第 1/2 阶段自检（本地假模型服务 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
@@ -163,18 +168,60 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | 阶段 | 命令 | 产出 | 状态 |
 |---|---|---|---|
 | 0 定交付规格 | 手工填 `project` | 分辨率/时长 | — |
-| 1 生成剧本 | 待写 | `script`、`scene` | LLM，可先手工 |
-| 2 提取实体+分级 | 待写 | `entity` | LLM，可先手工 |
+| **1 生成剧本** | `python pipeline\stage_script.py --episode-id N --brief "…"` | `script`、`scene` | ✅ |
+| **2 提取实体+分级** | `python pipeline\stage_entities.py --episode-id N` | `entity` | ✅ |
 | 3 定妆照 | 待写 | `image_generation`、`entity_ref` | ⏳ 待密钥 |
 | 4 三视图 | 待写 | `entity_ref(front/side/back)` | ⏳ 待密钥 |
-| 5 生成分镜 | 待写 | `shot`、`shot_entity` | LLM，可先手工 |
-| 6 提示词定稿 | 待写 | `shot.prompt` | LLM，可先手工 |
+| 5 生成分镜 | 待写 | `shot`、`shot_entity` | ⏳ |
+| 6 提示词定稿 | 待写 | `shot.prompt` | ⏳ |
 | 7 首帧图 | 待写 | `shot.first_frame_path` | ⏳ 待密钥 |
 | 8 视频生成 | 待写 | `generation` | ⏳ 待密钥 |
 | **9 抽帧与衔接** | `python pipeline\frames.py --episode-id N` | `*_first/last.png`、`continues_from` | ✅ |
 | **10 拼接与字幕** | `python pipeline\assemble.py --episode-id N [--srt F]` | `out/E0N.mp4`、`asset` | ✅ |
 
-第 9、10 阶段的要点：
+### 第 1/2 阶段的 LLM 配置
+
+`pipeline/llm.py` 用 urllib 直接打 `/chat/completions`，**不引任何第三方依赖**，
+所以同一套代码可指向火山方舟、DeepSeek 或任何 OpenAI 兼容网关。
+
+```powershell
+$env:LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'   # 默认值
+$env:LLM_API_KEY  = '...'                                        # 未设时回退 ARK_API_KEY
+$env:LLM_MODEL    = '...'                                        # 必填，不设默认值
+```
+
+**`LLM_MODEL` 刻意没有默认值**——猜错模型 ID 会让人在无关的地方排查半天，
+不如直接报错说清楚缺什么。
+
+两种驱动方式（可混用）：
+
+```powershell
+# A. 直接调模型
+python pipeline\stage_script.py --episode-id 1 --brief "一个关于化验单的悬疑短剧"
+
+# B. agent 驱动：跳过调用，读入外部产出的 JSON
+python pipeline\stage_script.py --episode-id 1 --brief "…" --from-json result.json
+
+# 只看会发出去的提示词，不调用
+python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
+```
+
+**实体分级是第 2 阶段的核心产出**，它直接决定要出多少张图：
+
+| tier | 出图 | 判据 |
+|---|---|---|
+| `main` | 定妆照 + 三视图（4 张） | 是否需要在多个镜头里保持长得一样 |
+| `secondary` | 只出定妆照（1 张） | |
+| `background` | 不出图 | 路人、一次性道具 |
+
+脚本跑完会按 `price_book` 里的图片单价，直接报出"预计要出多少张、约多少钱"。
+
+**自检**：`python pipeline\selftest_llm.py` —— 本地起一个**假模型服务**，
+真跑两个阶段。刻意让假模型返回带 ``` 围栏和前置解释文字的内容（真实模型就是这样），
+并覆盖：版本管理、幂等重跑、`--from-json`、模型返回垃圾时干净失败且不写脏库、
+未配置时报错可操作。共 32 项。
+
+### 第 9/10 阶段的要点
 
 - **抽帧**产出 `assets/frames/E{集}S{镜}_first.png` 与 `_last.png`
 - **衔接**默认把相邻镜头串起来：第 N+1 镜的首帧 = 第 N 镜的尾帧，
@@ -271,8 +318,9 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | 数据模型 | ✅ 统一实体（人物/场景/道具）+ 参考图 + 镜头续接 |
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
+| 第 1/2 阶段脚本 | ✅ 剧本生成（含版本管理）、实体提取与分级，32 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
-| 全量验收 | ✅ `python tools\verify.py`，30 项 |
+| 全量验收 | ✅ `python tools\verify.py`，32 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
 | Ark API Key | ⏳ 待提供，之后可跑第 3/4/7/8 阶段的真实生成 |
-| 第 1/2/5/6 阶段脚本 | ⏳ 待写（可用 LLM 生成，也可先手工填表） |
+| 第 5/6 阶段脚本 | ⏳ 待写（分镜、提示词定稿） |
