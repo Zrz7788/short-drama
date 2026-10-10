@@ -102,7 +102,8 @@ def persist(con, ep, data, dry):
 def main():
     ap = argparse.ArgumentParser(description="第 1 阶段：生成剧本")
     ap.add_argument("--episode-id", type=int, required=True)
-    ap.add_argument("--brief", required=True, help="创意梗概：题材、人物关系、核心冲突")
+    ap.add_argument("--brief", default=None,
+                    help="创意梗概。不传则取 project.logline（真源）")
     L.add_llm_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -116,7 +117,19 @@ def main():
     rep = C.Report("第 1 阶段 · 生成剧本")
     print("集：第 %s 集 项目：%s\n" % (ep["seq"], ep["project"]))
 
-    prompt = build_prompt(con, ep, args.brief)
+    # brief 不传就从 project.logline 取——数据库本来就是真源，
+    # 而 logline 在 spec 阶段就写好了。这样 run.py 之类的编排层不必
+    # 知道每个阶段有哪些参数（原来必须传 --brief，编排直接跑不起来）。
+    brief = args.brief or (ep["logline"] or "").strip()
+    if not brief:
+        print("没有创意梗概：--brief 没传，project.logline 也是空的。")
+        print("  去填 project.logline（真源），或直接传 --brief。")
+        con.close()
+        return 2
+    if not args.brief:
+        rep.info("brief 取自 project.logline：%s" % brief[:60])
+
+    prompt = build_prompt(con, ep, brief)
     if args.dump_prompt:
         print(prompt)
         con.close()

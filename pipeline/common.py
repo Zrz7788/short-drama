@@ -166,8 +166,11 @@ def episode_shots(con, episode_id):
 
 
 def episode_info(con, episode_id):
+    # 把 project.logline 一起带出来：它是创意梗概的**真源**，
+    # 第 1 阶段的 brief 不传时就取它（编排层不该知道每个阶段的参数）。
     r = con.execute(
-        "SELECT e.id, e.seq, e.title, p.name AS project, p.id AS project_id "
+        "SELECT e.id, e.seq, e.title, p.name AS project, p.id AS project_id,"
+        " p.logline, p.aspect_ratio, p.target_episode_seconds, e.target_seconds "
         "FROM episode e JOIN project p ON p.id = e.project_id WHERE e.id = ?",
         (episode_id,)).fetchone()
     return dict(r) if r else None

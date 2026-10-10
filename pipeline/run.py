@@ -131,7 +131,7 @@ def run_one(con, args, m, key, quiet=False):
     print("\n" + "=" * 72)
     print("阶段 %s%s" % (key, "（有人工门禁）" if u.human_approval else ""))
     print("  产出：%s" % (",".join(u.produces) or "-"))
-    print("  命令：python %s" % " ".join(cmd[2:]))
+    print("  命令：python %s" % " ".join(cmd[3:]))   # cmd = [python, -X, utf8, 脚本, ...]
     print("=" * 72)
     # 门禁先过，**dry-run 也要过**——否则试跑看不出自己会被拦，
     # 而"试跑一下看看"正是最容易跳过门禁的动作。
