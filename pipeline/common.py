@@ -16,6 +16,49 @@ FFMPEG = os.path.join(ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")
 FFPROBE = os.path.join(ROOT, ".tools", "ffmpeg", "bin", "ffprobe.exe")
 DEFAULT_DB = os.path.join(ROOT, "data", "drama.db")
 ASSETS = os.path.join(ROOT, "assets")
+ENV_FILE = os.path.join(ROOT, ".env")
+
+
+def load_env(path=None):
+    """把工作区的 .env 读进环境变量。返回载入的条数。
+
+    **已存在的环境变量优先**——所以自检里临时传的 ARK_API_KEY=test-key
+    不会被文件里的真值盖掉，CI 覆盖也照常生效。
+
+    为什么必须有这个函数：在这之前，ark.py 与 llm.py 的报错信息都写着
+    "推荐写进工作区 .env"，但**没有任何代码读那个文件**——那是句空头承诺。
+    实测发现：只设 .env 的话，脚本会报"密钥未配置"，而错误提示正是叫你写 .env。
+
+    为什么用文件而不是 setx：DSH 宿主进程在用户设环境变量之前就启动了，
+    setx 改的东西它看不见；而且 setx 的结果对已运行的父进程不生效。
+    文件是本机唯一可靠的传递方式，且 .env 已被 .gitignore 挡住。
+    """
+    p = path or ENV_FILE
+    if not os.path.exists(p):
+        return 0
+    n = 0
+    with open(p, encoding="utf-8-sig") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            key, sep, val = line.partition("=")
+            if not sep:
+                continue
+            key = key.strip()
+            val = val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = val
+                n += 1
+    return n
+
+
+# 模块导入时即生效：所有阶段脚本都 import common，所以一处加载、处处可用
+ENV_LOADED = load_env()
 
 
 def add_common_args(parser):
