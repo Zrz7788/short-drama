@@ -103,8 +103,11 @@ def main():
     rep.add("灌入 2 集共 %d 个镜头" % (len(clips_a) + len(clips_b)), True)
     con.close()
 
-    # ---- 场景 A：抽帧与续接 ----
-    print("\n--- 场景 A：frames.py（抽帧 + 续接）---")
+    # ---- 场景 A：抽帧（默认不串接）----
+    # 默认行为被两个独立来源纠正过：110 分钟 Seedance 长片全片禁用起始帧
+    # （上一镜最后一帧会拖带它自己的漂移），中文短剧 SOP 也把首尾帧标为可跳。
+    # 所以这里**先测默认不串**，再单独测 --continuity 那条路还通。
+    print("\n--- 场景 A：frames.py（默认只抽帧）---")
     p = stage("frames.py", ["--episode-id", str(ep1), "--db", TEST_DB])
     rep.add("frames.py 退出码为 0", p.returncode == 0,
             C.tail(p.stderr, 60))
@@ -121,11 +124,26 @@ def main():
         for key in ("first_frame_path", "last_frame_path"):
             rep.add("S%02d %s 文件存在" % (s["seq"], key.split("_")[0]),
                     os.path.exists(C.abs_path(s[key])), s[key] or "-")
-    rep.add("S02 续接 S01（continues_from）", shots[1]["continues_from"] == shots[0]["id"],
+    rep.add("默认**不**建立续接关系（continues_from 全空）",
+            all(s["continues_from"] is None for s in shots),
+            " ".join("S%02d:%s" % (s["seq"], s["continues_from"]) for s in shots))
+
+    # ---- 场景 A2：显式 --continuity 仍然可用 ----
+    print("\n--- 场景 A2：frames.py --continuity（显式串接）---")
+    p = stage("frames.py", ["--episode-id", str(ep1), "--db", TEST_DB, "--continuity"])
+    rep.add("--continuity 退出码为 0", p.returncode == 0, C.tail(p.stderr, 60))
+    shots = con.execute(
+        "SELECT id, seq, first_frame_path, last_frame_path, continues_from "
+        "FROM shot WHERE episode_id=? ORDER BY seq", (ep1,)).fetchall()
+    rep.add("显式要求时才串接 S02→S01",
+            shots[1]["continues_from"] == shots[0]["id"],
             "%s -> %s" % (shots[1]["continues_from"], shots[0]["id"]))
-    rep.add("S02 首帧 == S01 尾帧",
+    rep.add("串接时 S02 首帧 == S01 尾帧",
             shots[1]["first_frame_path"] == shots[0]["last_frame_path"],
             shots[1]["first_frame_path"])
+    # 复原：别把串接状态带进后面的拼接测试
+    con.execute("UPDATE shot SET continues_from=NULL WHERE episode_id=?", (ep1,))
+    con.commit()
 
     # ---- 场景 A：拼接 + 中文字幕 ----
     print("\n--- 场景 A：assemble.py（拼接 + 中文字幕）---")

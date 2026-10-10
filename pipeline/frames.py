@@ -1,17 +1,23 @@
 # -*- coding: utf-8 -*-
-"""第 9 阶段：抽帧与视频衔接。
+"""第 9 阶段：抽首尾帧，并按需建立镜头续接关系。
 
-对一集里每个已出片的镜头抽首帧与尾帧，并建立镜头之间的续接关系：
-第 N+1 镜的首帧 = 第 N 镜的尾帧，continues_from 指向第 N 镜。
+**默认只抽帧，不串接。** 这是被两个独立来源纠正过的结论：
 
-抽出的帧有两个用途：
-  1. 作为下一镜图生视频的输入（保证跨镜头连续）
-  2. 人工检查衔接是否成立——这是成片前最后一个便宜的关卡
+  - 一部已发布的 110 分钟 Seedance 长片**全片禁用起始帧**，理由是上一镜的
+    最后一帧"会拖带它自己的漂移（drags its own drift）"
+  - 一个中文短剧实战技能包把「首尾帧素材」在 SOP 对照表里标为
+    ⚠️ 可跳，用 ffmpeg fade 转场代替
+
+而且短剧镜头之间大多是硬切——机位和角度都变了，"后一镜从上一镜最后一帧开始"
+在物理上就不成立。连续性应当靠**角色资产 + 具名锁 + 状态单调性**承担。
+
+尾帧仍然有用：**点修复**（修单个镜头里坏掉的元素）与人工质检。
+所以默认两边都抽，只是不把后一镜的 first_frame 接到前一镜的 last_frame 上。
 
 用法：
-  python pipeline/frames.py --episode-id 1
+  python pipeline/frames.py --episode-id 1                 # 默认：只抽帧
+  python pipeline/frames.py --episode-id 1 --continuity     # 显式要求串接
   python pipeline/frames.py --episode-id 1 --dry-run
-  python pipeline/frames.py --episode-id 1 --no-continuity    # 只抽帧，不串接
 """
 import argparse
 import os
@@ -37,10 +43,10 @@ def extract(video_rel, out_rel, last, dry):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="抽帧与视频衔接")
+    ap = argparse.ArgumentParser(description="抽帧（默认不串接）")
     ap.add_argument("--episode-id", type=int, required=True)
-    ap.add_argument("--no-continuity", action="store_true",
-                    help="只抽帧，不建立镜头续接关系")
+    ap.add_argument("--continuity", action="store_true",
+                    help="显式要求建立镜头续接关系（默认不串，见文件头的原因）")
     C.add_common_args(ap)
     args = ap.parse_args()
 
@@ -55,7 +61,7 @@ def main():
     rep = C.Report("抽帧与衔接")
     print("集：第 %s 集《%s》 项目：%s" % (ep["seq"], ep["title"] or "-", ep["project"]))
     print("镜头 %d 个，模式：%s%s\n"
-          % (len(shots), "只抽帧" if args.no_continuity else "抽帧 + 衔接",
+          % (len(shots), "抽帧 + 串接" if args.continuity else "只抽帧（默认）",
              "（dry-run）" if args.dry_run else ""))
 
     if not args.dry_run:
@@ -89,8 +95,12 @@ def main():
                 con.execute("UPDATE shot SET first_frame_path=?, last_frame_path=? WHERE id=?",
                             (first_rel, last_rel, s["shot_id"]))
 
-    # --- 建立续接：后一镜接前一镜的尾帧 ---
-    if not args.no_continuity:
+    # --- 续接：默认**不做**，只有显式 --continuity 才建 ---
+    # 原来的默认是把相邻镜头全部串起来（后一镜首帧=前一镜尾帧）。
+    # 两个独立来源都指出这是错的：110 分钟 Seedance 长片全片禁用起始帧
+    # （上一镜最后一帧会拖带它自己的漂移）；中文短剧 SOP 把首尾帧标为可跳。
+    # 而且短剧多是硬切，这个串联在物理上不成立。
+    if args.continuity:
         chained = 0
         ok_list = [s for s in ready if s["shot_id"] in done]
         for prev, cur in zip(ok_list, ok_list[1:]):
@@ -104,10 +114,11 @@ def main():
                 % (chained, ok_list[0]["shot_seq"], ok_list[-1]["shot_seq"])
                 if chained else "0 组")
         if chained:
-            rep.info("注意：默认把相邻镜头全部串接。真实短剧有硬切，"
-                     "需要断开时请手工把该镜的 continues_from 置空并重跑。")
+            rep.info("已按 --continuity 串接。**请逐条确认这些镜头是真实延续**"
+                     "（同机位同动作），而不是习惯性串联。")
     else:
-        rep.info("已按 --no-continuity 跳过续接关系")
+        rep.info("默认只抽帧、不串接。连续性靠角色资产 + 具名锁 + 状态单调性承担；"
+                 "确实需要真实延续时再加 --continuity。")
 
     if not args.dry_run:
         con.commit()

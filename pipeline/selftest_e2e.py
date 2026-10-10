@@ -229,14 +229,24 @@ def main():
     rows = [dict(r) for r in con.execute(
         "SELECT id, seq, first_frame_path, last_frame_path, continues_from FROM shot "
         "WHERE episode_id=? ORDER BY seq", (eid,))]
-    rep.add("每镜都抽出了尾帧",
-            all(r["last_frame_path"] for r in rows),
+    rep.add("每镜都抽出了首尾帧",
+            all(r["last_frame_path"] and r["first_frame_path"] for r in rows),
             "%d / %d" % (sum(1 for r in rows if r["last_frame_path"]), len(rows)))
-    chained = all(rows[i]["continues_from"] == rows[i - 1]["id"]
-                  and rows[i]["first_frame_path"] == rows[i - 1]["last_frame_path"]
-                  for i in range(1, len(rows)))
-    rep.add("镜头续接链成立（后一镜首帧 = 前一镜尾帧）", chained,
-            "S%02d→S%02d 共 %d 组" % (rows[0]["seq"], rows[-1]["seq"], len(rows) - 1))
+    # 默认**不**串接：连续性靠角色资产 + 具名锁，不靠上一镜的尾帧。
+    # （110 分钟 Seedance 长片全片禁用起始帧；中文短剧 SOP 也把首尾帧标为可跳。）
+    rep.add("默认不建立续接关系（全片硬切）",
+            all(r["continues_from"] is None for r in rows),
+            "有续接的镜数 %d" % sum(1 for r in rows if r["continues_from"]))
+    # 显式要求时那条路仍然通
+    p2 = run("frames.py", ["--episode-id", str(eid), "--db", TEST_DB, "--continuity"],
+             llm_base, ark_base)
+    rep.add("显式 --continuity 仍可用", p2.returncode == 0, C.tail(p2.stderr, 50))
+    chained_n = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=? AND "
+                            "continues_from IS NOT NULL", (eid,)).fetchone()[0]
+    rep.add("显式串接时后一镜首帧 = 前一镜尾帧",
+            chained_n == len(rows) - 1, "%d 组（预期 %d）" % (chained_n, len(rows) - 1))
+    con.execute("UPDATE shot SET continues_from=NULL WHERE episode_id=?", (eid,))
+    con.commit()
     con.close()
 
     srt_rel = os.path.join(".tools", "e2e-test", "assets", "subs", "E01.srt")

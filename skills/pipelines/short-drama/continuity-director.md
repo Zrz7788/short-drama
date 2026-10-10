@@ -45,7 +45,7 @@
 ### 1. 抽帧
 
 ```powershell
-python pipeline\frames.py --episode-id 1 --no-continuity   # 默认：只抽帧，不串联
+python pipeline\frames.py --episode-id 1                   # 默认：只抽帧
 ```
 
 每个镜头都抽出首帧与尾帧——即使不串联，尾帧在点修复和质检时也用得上。
@@ -53,7 +53,7 @@ python pipeline\frames.py --episode-id 1 --no-continuity   # 默认：只抽帧�
 ### 2. 只在真实延续时串联
 
 ```powershell
-python pipeline\frames.py --episode-id 1 --continuity      # 显式要求串联时才用
+python pipeline\frames.py --episode-id 1 --continuity       # 显式要求串联时才用
 ```
 
 用完要能回答："这两个镜头为什么必须接上？" 答不出来就不该串。
