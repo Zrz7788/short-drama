@@ -19,6 +19,9 @@ db/                 数据库
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
+tools/              工具
+  setup_git.py       记录 MinGit 的获取方式，保证可复现
+  verify.py          工程底座全量验收（25 项检查）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
   ssh/               GitHub SSH 密钥
@@ -28,6 +31,9 @@ data/                数据库文件与导出（*.db 不进 git）
 
 ```powershell
 $git = "$PWD\.tools\mingit\cmd\git.exe"
+
+# 全量验收：git + 安全 + 知识库 + 数据库，共 25 项检查
+python tools\verify.py
 
 # 建/校验数据库（含增量迁移）
 python db\init_db.py
