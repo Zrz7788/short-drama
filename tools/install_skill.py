@@ -242,6 +242,8 @@ def do_install(packs, names, dry_run):
                 "license": "AGPL-3.0",
                 "files": n,
                 "bytes": p["bytes"],
+                # 与 --from-github 那条路保持同一套字段，读的人不用猜
+                "extras": [],
                 "description": fm.get("description", "")[:400],
                 "warnings": soft,
             }
@@ -335,6 +337,9 @@ def do_github(repo, path, name, ref, license_id, extras, dry_run):
         "license": license_id or "unknown",
         "files": len(files),
         "bytes": total,
+        # 记下额外附带的文件。不记的话 --restore 恢复时会**静默丢掉**它们
+        # （实测：ai-mandrama-pipeline 的案例复盘就是这么漏的）。
+        "extras": list(extras or []),
         "description": (parse_frontmatter(skill_md or "") or {}).get("description", "")[:400],
         "warnings": soft,
     }
@@ -344,12 +349,73 @@ def do_github(repo, path, name, ref, license_id, extras, dry_run):
     return 0
 
 
+def do_restore():
+    """按 _provenance.json 把技能包装回来。
+
+    包内容不进 git（许可原因，见 .gitignore），所以换台机器 clone 下来后
+    这个目录是空的——这条命令读出处清单，按记录重新拉取。
+
+    优先走本地 tarball：OpenMontage 那 12 个包逐个走 GitHub API 会很快撞上
+    未认证限速（60 次/小时），而本地整包一次就能全解出来。
+    """
+    if not os.path.exists(PROVENANCE):
+        print("没有出处清单，无从恢复：%s" % PROVENANCE)
+        return 1
+    prov = json.load(open(PROVENANCE, encoding="utf-8"))
+    tar = os.path.join(ROOT, ".tools", "ref-openmontage", "openmontage.tar.gz")
+
+    from_tar = {n: v for n, v in prov.items()
+                if "OpenMontage" in (v.get("source") or "")}
+    from_gh = {n: v for n, v in prov.items() if n not in from_tar}
+
+    failed = []
+    if from_tar:
+        if os.path.exists(tar):
+            packs = load_tar(tar)
+            names = [n for n in from_tar
+                     if os.path.exists(os.path.join(DEST_ROOT, n, "SKILL.md"))]
+            done = [n for n in from_tar if n not in names]
+            print("从本地 tarball 恢复 %d 个（已在磁盘上的 %d 个跳过）"
+                  % (len(done), len(names)))
+            if done:
+                do_install(packs, done, False)
+        else:
+            print("本地 tarball 不在：%s" % tar)
+            print("  OpenMontage 的 %d 个包需要它。获取方式："
+                  "见 README 的「参照语料」一节" % len(from_tar))
+            failed += list(from_tar)
+
+    for n, v in from_gh.items():
+        src = (v.get("source") or "")
+        path = v.get("path") or ""
+        if not src.startswith("github.com/"):
+            print("  跳过 %s：来源 %s 不是 GitHub 仓库" % (n, src[:50]))
+            failed.append(n)
+            continue
+        repo = src[len("github.com/"):]
+        print("\n从 GitHub 恢复 %s（%s %s）" % (n, repo, path))
+        rc = do_github(repo, path, n, v.get("ref") or "main",
+                       v.get("license"), v.get("extras") or [], False)
+        if rc:
+            failed.append(n)
+
+    print("\n" + "=" * 60)
+    total = len(prov)
+    print("恢复完成：%d/%d 成功" % (total - len(failed), total))
+    if failed:
+        print("未恢复：%s" % ", ".join(failed))
+        return 1
+    return 0
+
+
 def main():
     global ARGS
     ap = argparse.ArgumentParser()
     ap.add_argument("--tar", help="本地 tarball 路径")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--install", nargs="*", default=[])
+    ap.add_argument("--restore", action="store_true",
+                    help="按 _provenance.json 把技能包装回来")
     ap.add_argument("--from-url")
     ap.add_argument("--from-github", help="owner/repo")
     ap.add_argument("--path", help="仓库内目录，如 skills/xxx")
@@ -360,6 +426,9 @@ def main():
     ap.add_argument("--name")
     ap.add_argument("--dry-run", action="store_true")
     ARGS = ap.parse_args()
+
+    if ARGS.restore:
+        return do_restore()
 
     if ARGS.from_github:
         if not (ARGS.path and ARGS.name):

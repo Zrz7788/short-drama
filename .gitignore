@@ -35,6 +35,13 @@ data/*.db-shm
 Thumbs.db
 .DS_Store
 
+# ---- 第三方技能包：内容不进 git，只留下出处清单 ----
+# skills/techniques/ 下的包来自别处：12 个是 OpenMontage（AGPL-3.0）、
+# 2 个是 ai-mandrama-skills（MIT）。本仓库是公开的，转发 AGPL 内容会带来
+# 许可义务，所以只保留我们自己的出处清单 _provenance.json。
+# 装回来一条命令： python tools\install_skill.py --restore
+skills/techniques/*/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

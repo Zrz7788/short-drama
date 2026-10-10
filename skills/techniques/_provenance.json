@@ -149,6 +149,9 @@
     "license": "MIT",
     "files": 3,
     "bytes": 52980,
+    "extras": [
+      "examples/case-study-末世招队员第一集.md"
+    ],
     "description": "帮助用户用 Dreamina CLI + edge-tts + ffmpeg 端到端制作中文 AI 漫剧/短剧（日漫赛璐璐风、1-3 分钟、横版+竖版双端、配音+字幕+BGM+片头片尾完整成片），用一套\"角色三视图锚定 + 14 镜头串行 image2video + 后台 polling 自动化 + ffmpeg master 拼接\"流水线替代\"text2image 全程导致角色漂移 / 视频任务并发撞限流 / libass 中文字幕变方块\"的常见坑。当用户描述\"我有剧本一卡和分镜表想做 AI 漫剧 / 把短剧剧本做成动态漫剧 / 鱼子酱 AI 漫剧课程 SOP 实操 / 一集 14 镜头怎么从分镜到成片 / 我做 AI 短剧角色每帧脸都不一样 / 我视频任务卡在 dreamina 队列 / 我做完角色三视图下一步怎么走 / 用 ffmpeg 拼成中文短剧字幕变方块 / 我没人值守想让它自",
     "warnings": [
       "没有出处 URL（可信度无法追溯）"
@@ -161,6 +164,7 @@
     "license": "MIT",
     "files": 1,
     "bytes": 11974,
+    "extras": [],
     "description": "帮助用户用免费的微软 edge-tts 神经语音做中文角色化 TTS 配音（多角色声线分配 + SSML rate/pitch 情绪精调 + ffmpeg 多段 mp3 按时间码合到视频音轨），用一套\"Yunxi 男主 / Yunjian 反派 / Yunxia 配角 / Xiaoxiao 旁白 4 类声线 + 6 情绪 rate/pitch 表 + adelay+amix 多段合成模板\"替代\"macOS say 90% 中文 voice 是空音 / 商用 TTS 太贵 / TTS 念稿没情绪\"的常见坑。当用户描述\"我要给短剧/有声小说/教程/Vlog 配中文 TTS / macOS say 出来都是空音 / 我用 Tingting 配音听起来机器味重 / 我配音念稿一个调没起伏 / 我要多角色对白配音怎么分声线 / 我陆明的爽文台词怎么读出装逼范 / 我系统女音怎么有机械感 / 我反派怎",
     "warnings": [
       "没有出处 URL（可信度无法追溯）"
