@@ -129,6 +129,39 @@ fatal: Could not read from remote repository.
 辅助表：`project`、`character`、`meta`。视图：`v_episode_cost`、`v_episode_outline`、
 `v_shot_progress`、`v_price_book`。
 
+## 接入远程仓库
+
+SSH 密钥已生成在 `.tools/ssh/`（**不进 git**）。公钥：
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILb9uMXKJ8mw8DQlghO96GIplzPT40ft118xO1xdJQeM zrz@short-drama
+```
+
+指纹（贴完可在 GitHub 上核对）：
+
+```
+SHA256:o6SMoggislx/SKLWEQFCNuoexmll5awxinn2AqM+McU  (ED25519)
+```
+
+**已实测**：`github.com:22`、`ssh.github.com:443`、`gitee.com:22/443` 全部可达，
+且用官方主机密钥校验通过（不是 TOFU）。只差登记公钥。
+
+步骤：
+
+1. 在 GitHub 新建**空**仓库——**不要勾** README / .gitignore / license，否则会和本地历史冲突
+   （Gitee 同理，也是 0.3 秒可达的替代方案）
+2. 把上面的公钥贴到 Settings → SSH and GPG keys
+3. 回到本机：
+
+```powershell
+$git = "$PWD\.tools\mingit\cmd\git.exe"
+& $git remote add origin git@github.com:<用户名>/<仓库名>.git
+& $git push -u origin main
+```
+
+第 3 步在受限沙箱下会报信号管道错误，**需要批准一次提权**（原因见「本机环境要点」§2）。
+后续每次 `push` 同理。
+
 ## 项目纪律
 
 1. **密钥不进 git。** `ARK_API_KEY` 放环境变量或本地 `.env`（已被 `.gitignore` 挡住）
