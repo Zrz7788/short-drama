@@ -19,13 +19,15 @@ db/                 数据库
 pipeline/           管线阶段脚本
   common.py           共用层：路径、数据库连接、ffmpeg 调用
   llm.py              LLM 共用层：OpenAI 兼容调用、JSON 抽取、结构校验
-  prompts/            提示词模板（script.md、entities.md）
+  prompts/            提示词模板（script / entities / storyboard / shot_prompt）
   stage_script.py     第 1 阶段：生成剧本（含版本管理）
   stage_entities.py   第 2 阶段：提取人物/场景/道具并分级
+  stage_storyboard.py 第 5 阶段：生成分镜（含按镜抽卡策略）
+  stage_prompts.py    第 6 阶段：提示词定稿（确定性组装，不走 LLM）
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
   assemble.py         第 10 阶段：拼接成集、可选烧字幕
   selftest.py         管线端到端自检（合成素材 + 临时库）
-  selftest_llm.py     第 1/2 阶段自检（本地假模型服务 + 临时库）
+  selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
@@ -172,14 +174,14 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | **2 提取实体+分级** | `python pipeline\stage_entities.py --episode-id N` | `entity` | ✅ |
 | 3 定妆照 | 待写 | `image_generation`、`entity_ref` | ⏳ 待密钥 |
 | 4 三视图 | 待写 | `entity_ref(front/side/back)` | ⏳ 待密钥 |
-| 5 生成分镜 | 待写 | `shot`、`shot_entity` | ⏳ |
-| 6 提示词定稿 | 待写 | `shot.prompt` | ⏳ |
+| **5 生成分镜** | `python pipeline\stage_storyboard.py --episode-id N` | `shot`、`shot_entity` | ✅ |
+| **6 提示词定稿** | `python pipeline\stage_prompts.py --episode-id N` | `shot.prompt`、`negative_prompt` | ✅ |
 | 7 首帧图 | 待写 | `shot.first_frame_path` | ⏳ 待密钥 |
 | 8 视频生成 | 待写 | `generation` | ⏳ 待密钥 |
 | **9 抽帧与衔接** | `python pipeline\frames.py --episode-id N` | `*_first/last.png`、`continues_from` | ✅ |
 | **10 拼接与字幕** | `python pipeline\assemble.py --episode-id N [--srt F]` | `out/E0N.mp4`、`asset` | ✅ |
 
-### 第 1/2 阶段的 LLM 配置
+### 第 1/2/5/6 阶段的 LLM 配置
 
 `pipeline/llm.py` 用 urllib 直接打 `/chat/completions`，**不引任何第三方依赖**，
 所以同一套代码可指向火山方舟、DeepSeek 或任何 OpenAI 兼容网关。
@@ -216,10 +218,57 @@ python pipeline\stage_script.py --episode-id 1 --brief "…" --dump-prompt
 
 脚本跑完会按 `price_book` 里的图片单价，直接报出"预计要出多少张、约多少钱"。
 
-**自检**：`python pipeline\selftest_llm.py` —— 本地起一个**假模型服务**，
-真跑两个阶段。刻意让假模型返回带 ``` 围栏和前置解释文字的内容（真实模型就是这样），
-并覆盖：版本管理、幂等重跑、`--from-json`、模型返回垃圾时干净失败且不写脏库、
-未配置时报错可操作。共 32 项。
+### 第 5 阶段的要点：抽卡策略
+
+第 5 阶段把剧本拆成镜头，**同时为每个镜头决定抽卡策略**——这是它最大的价值，
+因为策略直接决定成本：
+
+| 镜头类型 | strategy | draws_planned |
+|---|---|---|
+| 正脸特写、情绪戏、对手戏 | `draft` | 4–6 |
+| 常规叙事镜头 | `draft` | 2–3 |
+| 空镜、背影、手部、转场 | `direct` | 1–2 |
+
+脚本会拒绝"一刀切"的产出，并在跑完时按 `price_book` 报出视频成本预估。
+
+另外脚本会**校验实体引用**：分镜里出现的实体名必须逐字存在于 `entity` 表，
+自己新造一个名字会被直接拒绝。纯空镜也必须挂上所在布景——否则这个镜头
+没有任何视觉锚点，出图时无从约束。
+
+### 第 6 阶段的要点：刻意不走 LLM
+
+提示词定稿是**确定性拼接**，不调用任何模型。理由只有一条，但足以定案：
+
+> 实体的外观描述块必须**逐字复制**进每个镜头的提示词。一旦让模型"润色"，
+> 同一个人在不同镜头里就会被描述成不同的人——**这正是跨镜头崩脸的起点**。
+
+代价是提示词读起来不如人写的顺，收益是跨镜头逐字一致、完全可复现、零成本。
+而且脚本里对这一点做了**机械校验**：任何实体的描述块没有原样出现在提示词里，
+就立刻报错。自检里还有一项反向验证——故意改坏模板，确认它真的会失败。
+
+改了实体描述或改了模板，重跑一次第 6 阶段即可，不必再调模型。
+
+```powershell
+python pipeline\stage_prompts.py --episode-id 1            # 组装并写库
+python pipeline\stage_prompts.py --episode-id 1 --show 3   # 打印第 3 镜的成品
+```
+
+### 自检
+
+`python pipeline\selftest_llm.py` —— 本地起一个**假模型服务**，真跑第 1/2/5/6
+四个阶段。刻意让假模型返回带 ``` 围栏和前置解释文字的内容（真实模型就是这样），
+只测干净路径等于没测。共 49 项，覆盖：
+
+- JSON 抽取的 5 种脏形态 + 垃圾输入
+- 剧本版本管理（v1 降级、v2 上位、旧稿保留）
+- 实体提取幂等重跑、`--from-json`
+- **模型返回垃圾时干净失败，且一行脏数据都不写库**
+- 未配置 LLM 时报错指出缺哪个变量
+- 分镜的抽卡策略分化、实体引用校验、空镜必须挂布景
+- 提示词逐字校验
+- **反向验证**：改坏模板必须立刻失败
+- 改实体描述后，新描述传导到全部含它的镜头
+- 生产库全程未被写入
 
 ### 第 9/10 阶段的要点
 
@@ -318,9 +367,8 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | 数据模型 | ✅ 统一实体（人物/场景/道具）+ 参考图 + 镜头续接 |
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
-| 第 1/2 阶段脚本 | ✅ 剧本生成（含版本管理）、实体提取与分级，32 项自检通过 |
+| 第 1/2/5/6 阶段脚本 | ✅ 剧本、实体分级、分镜、提示词定稿，49 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
 | 全量验收 | ✅ `python tools\verify.py`，31 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
 | Ark API Key | ⏳ 待提供，之后可跑第 3/4/7/8 阶段的真实生成 |
-| 第 5/6 阶段脚本 | ⏳ 待写（分镜、提示词定稿） |

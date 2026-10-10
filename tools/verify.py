@@ -54,6 +54,7 @@ FFMPEG = os.path.join(ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")
 PIPELINE_SCRIPTS = ["pipeline/common.py", "pipeline/llm.py",
                     "pipeline/frames.py", "pipeline/assemble.py",
                     "pipeline/stage_script.py", "pipeline/stage_entities.py",
+                    "pipeline/stage_storyboard.py", "pipeline/stage_prompts.py",
                     "pipeline/selftest.py", "pipeline/selftest_llm.py"]
 
 results = []
@@ -201,7 +202,7 @@ def check_pipeline():
         return
     run_child("tools/verify_ffmpeg.py", "ffmpeg 功能验证（编码器/滤镜/中文字幕）")
     run_child("pipeline/selftest.py", "管线端到端自检（抽帧/衔接/拼接/字幕）")
-    run_child("pipeline/selftest_llm.py", "第 1/2 阶段自检（LLM/JSON 抽取/落库/版本）")
+    run_child("pipeline/selftest_llm.py", "第 1/2/5/6 阶段自检（LLM/抽取/落库/组装/反向验证）")
 
 
 def check_selftest():

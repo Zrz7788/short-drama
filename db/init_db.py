@@ -52,6 +52,9 @@ COLUMN_MIGRATIONS = [
     # 抽卡多次后必须能指明"哪条是选中的"，否则拼片时不知道用哪个文件
     ("shot", "selected_generation_id",
      "ALTER TABLE shot ADD COLUMN selected_generation_id INTEGER REFERENCES generation(id)"),
+    # 第 5 阶段产出、第 6 阶段消费：可见动作与光线
+    ("shot", "action", "ALTER TABLE shot ADD COLUMN action TEXT"),
+    ("shot", "lighting", "ALTER TABLE shot ADD COLUMN lighting TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

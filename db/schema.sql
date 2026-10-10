@@ -167,7 +167,9 @@ CREATE TABLE IF NOT EXISTS shot (
     duration_s      REAL    NOT NULL DEFAULT 4,     -- 2.x 支持 4-15 秒
     shot_size       TEXT,                           -- 特写/近景/中景/全景
     camera_move     TEXT,                           -- 推/拉/摇/移/跟
-    description     TEXT,                           -- 画面描述
+    description     TEXT,                           -- 给人看的：情绪与意图
+    action          TEXT,                           -- 给模型看的：可见的动作与微表情
+    lighting        TEXT,                           -- 光线与氛围（第 6 阶段组装 prompt 用）
     dialogue        TEXT,                           -- 台词
     sfx             TEXT,                           -- 音效/环境音
     prompt          TEXT,                           -- 视频提示词

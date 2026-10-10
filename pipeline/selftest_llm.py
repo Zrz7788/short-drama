@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
-"""第 1/2 阶段的端到端自检。
+"""第 1/2/5/6 阶段的端到端自检。
 
-在本地起一个假的 OpenAI 兼容服务，让 stage_script.py 与 stage_entities.py
-真跑一遍：调用 -> JSON 抽取 -> 结构校验 -> 落库 -> 版本管理。
+在本地起一个假的 OpenAI 兼容服务，让四个阶段脚本真跑一遍：
+调用 -> JSON 抽取 -> 结构校验 -> 落库 -> 版本管理 -> 逐镜组装提示词。
 
 刻意让 mock 返回**带 ``` 围栏和前置解释文字**的内容，而不是干净的 JSON——
 真实模型就是这样的，只测干净路径等于没测。
+
+还包含一项反向验证：故意改坏提示词模板，确认"实体描述必须逐字出现"
+这条保证会立刻失败，而不是等 80 集之后才发现主角每次长得都不一样。
 
 全程用临时库，不碰生产数据。
 
@@ -28,7 +31,7 @@ from pipeline import llm as L  # noqa: E402
 TEST_ROOT = os.path.join(C.ROOT, ".tools", "llm-test")
 TEST_DB = os.path.join(TEST_ROOT, "test.db")
 
-rep = C.Report("第 1/2 阶段自检")
+rep = C.Report("第 1/2/5/6 阶段自检")
 
 # ---------------------------------------------------------------- 假模型的回复
 
@@ -67,11 +70,60 @@ ENTITY_OBJ = {
         {"kind": "location", "name": "医院走廊", "alias": "", "tier": "secondary",
          "description": "深夜空走廊，日光灯管发白，地面反光",
          "style_note": "冷白光，高对比"},
+        {"kind": "location", "name": "天台", "alias": "", "tier": "main",
+         "description": "老旧居民楼天台，水泥地面有裂缝，四周是齐腰铁栏杆",
+         "style_note": "夜，城市灯光背景，风大"},
         {"kind": "prop", "name": "化验单", "alias": "那张纸", "tier": "secondary",
          "description": "A5 大小的医院化验单，被攥出褶皱",
          "style_note": "白纸黑字，边缘皱"},
     ],
 }
+
+# 分镜计划：14 个镜头，合计 79 秒，draft 与 direct 都有，含单人/双人/纯空镜
+SCENE_LOC = {1: "出租屋", 2: "出租屋", 3: "医院走廊", 4: "天台", 5: "天台", 6: "天台"}
+SHOT_PLAN = [
+    (1, 4, "特写", "固定", "draft", 5, [("林薇", "subject"), ("化验单", "prop")]),
+    (2, 4, "近景", "推", "draft", 3, [("林薇", "subject")]),
+    (2, 6, "中景", "固定", "draft", 3, [("林薇", "subject")]),
+    (2, 6, "特写", "固定", "draft", 5, [("化验单", "prop")]),
+    (3, 4, "全景", "跟", "direct", 1, [("林薇", "subject")]),
+    (3, 8, "中景", "移", "draft", 3, [("林薇", "subject"), ("陈默", "subject")]),
+    (3, 8, "近景", "固定", "draft", 4, [("林薇", "subject"), ("陈默", "subject")]),
+    (4, 4, "全景", "升降", "direct", 1, []),
+    (4, 6, "中景", "固定", "draft", 3, [("林薇", "subject"), ("陈默", "subject")]),
+    (4, 6, "特写", "推", "draft", 5, [("林薇", "subject")]),
+    (5, 4, "近景", "固定", "draft", 4, [("陈默", "subject")]),
+    (5, 6, "特写", "推", "draft", 6, [("林薇", "subject")]),
+    (5, 6, "中景", "拉", "draft", 3, [("林薇", "subject"), ("陈默", "subject")]),
+    (6, 7, "远景", "固定", "direct", 1, []),
+]
+
+
+def build_storyboard():
+    shots = []
+    for i, (scene, dur, size, cam, strat, draws, ents) in enumerate(SHOT_PLAN, start=1):
+        listing = [{"name": n, "role": r} for n, r in ents]
+        # 纯空镜也必须挂上所在布景，否则这个镜头没有任何视觉锚点
+        if not listing:
+            listing = [{"name": SCENE_LOC[scene], "role": "background"}]
+        elif not any(r == "background" for _, r in ents):
+            listing.append({"name": SCENE_LOC[scene], "role": "background"})
+        shots.append({
+            "scene_seq": scene,
+            "seq": i,
+            "duration_s": dur,
+            "shot_size": size,
+            "camera_move": cam,
+            "description": "第%d镜：%s" % (i, size),
+            "action": "角色完成一个可见的动作，幅度适中，面部有细微表情变化",
+            "dialogue": "你到底是谁？" if i == 7 else "",
+            "sfx": "夜风声" if scene in (4, 5, 6) else "室内安静",
+            "lighting": "冷调夜景，侧逆光" if scene != 1 else "床头台灯暖光",
+            "entities": listing,
+            "strategy": strat,
+            "draws_planned": draws,
+        })
+    return {"shots": shots}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -87,6 +139,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             payload = SCRIPT_OBJ
         elif "美术统筹" in prompt:
             payload = ENTITY_OBJ
+        elif "分镜师" in prompt:
+            payload = build_storyboard()
         else:
             payload = {}
 
@@ -158,6 +212,7 @@ def main():
     rep.add("已启动", True, base)
 
     # ---- 2. 临时库 ----
+    print("\n=== 2. 临时库 ===")
     p = subprocess.run([sys.executable, "-X", "utf8",
                         os.path.join(C.ROOT, "db", "init_db.py"),
                         "--db", TEST_DB, "--rebuild"],
@@ -235,8 +290,11 @@ def main():
     tiers = {}
     for r in rows:
         tiers[r["role"]] = tiers.get(r["role"], 0) + 1
+    n_main = sum(1 for e in ENTITY_OBJ["entities"] if e["tier"] == "main")
+    n_sec = sum(1 for e in ENTITY_OBJ["entities"] if e["tier"] == "secondary")
+    n_bg = sum(1 for e in ENTITY_OBJ["entities"] if e["tier"] == "background")
     rep.add("分级写入 role 字段",
-            tiers == {"main": 3, "secondary": 2, "background": 1},
+            tiers == {"main": n_main, "secondary": n_sec, "background": n_bg},
             " ".join("%s=%d" % kv for kv in sorted(tiers.items())))
     m = con.execute("SELECT description FROM entity WHERE name='林薇'").fetchone()
     rep.add("description 是可粘贴的描述块",
@@ -297,8 +355,121 @@ def main():
             p.returncode != 0 and "LLM_MODEL" in blob and "LLM_API_KEY" in blob,
             C.tail(blob, 60))
 
+    # ---- 11. 第 5 阶段：分镜 ----
+    print("\n=== 10. 第 5 阶段 stage_storyboard.py ===")
+    p = run_stage("stage_storyboard.py",
+                  ["--episode-id", str(eid), "--db", TEST_DB], base_url=base)
+    rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    if p.returncode:
+        print("\n".join(p.stdout.strip().splitlines()[-16:]))
+
+    con = C.connect(TEST_DB)
+    n_shots = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=?",
+                          (eid,)).fetchone()[0]
+    rep.add("shot 行数", n_shots == len(SHOT_PLAN),
+            "%d（预期 %d）" % (n_shots, len(SHOT_PLAN)))
+    tot = con.execute("SELECT SUM(duration_s) FROM shot WHERE episode_id=?",
+                      (eid,)).fetchone()[0]
+    rep.add("镜头时长合计", abs(tot - 79) < 0.01, "%.0f 秒（预期 79）" % tot)
+    strat = dict(con.execute("SELECT strategy, COUNT(*) FROM shot WHERE episode_id=? "
+                             "GROUP BY strategy", (eid,)).fetchall())
+    rep.add("抽卡策略已分化（不是一刀切）",
+            strat.get("draft", 0) > 0 and strat.get("direct", 0) > 0,
+            " ".join("%s=%d" % kv for kv in sorted(strat.items())))
+    n_link = con.execute("SELECT COUNT(*) FROM shot_entity se JOIN shot s ON s.id=se.shot_id "
+                         "WHERE s.episode_id=?", (eid,)).fetchone()[0]
+    rep.add("shot_entity 关联已写入", n_link > 0, "%d 条" % n_link)
+    orphan = con.execute(
+        "SELECT COUNT(*) FROM shot s WHERE s.episode_id=? AND NOT EXISTS "
+        "(SELECT 1 FROM shot_entity se WHERE se.shot_id = s.id)", (eid,)).fetchone()[0]
+    rep.add("没有孤立镜头（纯空镜也挂了布景）", orphan == 0, "%d 个无实体" % orphan)
+    filled = con.execute(
+        "SELECT COUNT(*) FROM shot WHERE episode_id=? AND action IS NOT NULL AND action<>'' "
+        "AND lighting IS NOT NULL AND lighting<>''", (eid,)).fetchone()[0]
+    rep.add("action/lighting 写进独立字段（不是塞进 prompt）",
+            filled == len(SHOT_PLAN), "%d / %d" % (filled, len(SHOT_PLAN)))
+    stt = con.execute("SELECT status FROM episode WHERE id=?", (eid,)).fetchone()[0]
+    rep.add("episode 状态置为 storyboarded", stt == "storyboarded", stt)
+    con.close()
+
+    # ---- 12. 第 6 阶段：提示词定稿 ----
+    print("\n=== 11. 第 6 阶段 stage_prompts.py ===")
+    p = run_stage("stage_prompts.py", ["--episode-id", str(eid), "--db", TEST_DB])
+    rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    if p.returncode:
+        print("\n".join(p.stdout.strip().splitlines()[-16:]))
+
+    con = C.connect(TEST_DB)
+    n_p = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=? AND prompt IS NOT NULL "
+                      "AND prompt<>''", (eid,)).fetchone()[0]
+    rep.add("全部镜头都有 prompt", n_p == len(SHOT_PLAN),
+            "%d / %d" % (n_p, len(SHOT_PLAN)))
+    n_n = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=? AND negative_prompt "
+                      "IS NOT NULL AND negative_prompt<>''", (eid,)).fetchone()[0]
+    rep.add("全部镜头都有 negative_prompt", n_n == len(SHOT_PLAN), "%d 个" % n_n)
+
+    miss = 0
+    for r in con.execute("SELECT id, prompt FROM shot WHERE episode_id=?", (eid,)):
+        for e in con.execute("SELECT e.description FROM shot_entity se "
+                            "JOIN entity e ON e.id = se.entity_id WHERE se.shot_id=?",
+                            (r["id"],)):
+            if e["description"] not in r["prompt"]:
+                miss += 1
+    rep.add("实体描述逐字出现在 prompt 中", miss == 0, "%d 处缺失" % miss)
+
+    multi = con.execute(
+        "SELECT COUNT(*) FROM (SELECT se.shot_id FROM shot_entity se JOIN shot s ON s.id=se.shot_id "
+        "WHERE s.episode_id=? GROUP BY se.shot_id "
+        "HAVING SUM(CASE WHEN se.role='subject' THEN 1 ELSE 0 END) > 1)", (eid,)).fetchone()[0]
+    fused = con.execute("SELECT COUNT(*) FROM shot WHERE episode_id=? AND "
+                        "negative_prompt LIKE '%人物融合%'", (eid,)).fetchone()[0]
+    rep.add("多主体镜头追加了一致性负面词", multi > 0 and fused == multi,
+            "多主体 %d 个，已追加 %d 个" % (multi, fused))
+    con.close()
+
+    # ---- 13. 反向验证：模板被改坏时必须立刻失败 ----
+    print("\n=== 12. 反向验证：破坏模板应立刻失败 ===")
+    tpl = os.path.join(C.ROOT, "pipeline", "prompts", "shot_prompt.md")
+    backup = tpl + ".selftest-bak"
+    shutil.copy2(tpl, backup)
+    try:
+        with open(tpl, "w", encoding="utf-8") as f:
+            f.write("【景别】$shot_size 【运镜】$camera_move\n\n【动作】$action\n")
+        p = run_stage("stage_prompts.py", ["--episode-id", str(eid), "--db", TEST_DB])
+        blob = p.stdout + p.stderr
+        rep.add("模板丢掉实体块时报错退出", p.returncode != 0, "退出码 %d" % p.returncode)
+        err = next((l for l in blob.splitlines() if "逐字" in l), "")
+        rep.add("报错指明了原因（逐字校验）", bool(err), err.strip()[:60])
+    finally:
+        shutil.copy2(backup, tpl)
+        os.remove(backup)
+
+    p = run_stage("stage_prompts.py", ["--episode-id", str(eid), "--db", TEST_DB])
+    rep.add("恢复模板后可重新跑通", p.returncode == 0, C.tail(p.stderr, 40))
+
+    # ---- 14. 改了实体描述后重跑，提示词应随之更新 ----
+    print("\n=== 13. 实体描述变更应传导到所有含它的镜头 ===")
+    con = C.connect(TEST_DB)
+    con.execute("UPDATE entity SET description=? WHERE name='林薇'",
+                ("32岁女性，东亚面孔，齐肩黑直发，杏眼，左眉尾浅疤，新加了红色围巾",))
+    con.commit()
+    con.close()
+    run_stage("stage_prompts.py", ["--episode-id", str(eid), "--db", TEST_DB])
+    con = C.connect(TEST_DB)
+    hit = con.execute(
+        "SELECT COUNT(*) FROM shot s JOIN shot_entity se ON se.shot_id = s.id "
+        "JOIN entity e ON e.id = se.entity_id WHERE s.episode_id=? AND e.name='林薇' "
+        "AND s.prompt LIKE '%新加了红色围巾%'", (eid,)).fetchone()[0]
+    total_lin = con.execute(
+        "SELECT COUNT(DISTINCT s.id) FROM shot s JOIN shot_entity se ON se.shot_id = s.id "
+        "JOIN entity e ON e.id = se.entity_id WHERE s.episode_id=? AND e.name='林薇'",
+        (eid,)).fetchone()[0]
+    rep.add("新描述传导到了全部含该实体的镜头", total_lin > 0 and hit == total_lin,
+            "%d / %d 个镜头已更新" % (hit, total_lin))
+    con.close()
+
     # ---- 隔离性 ----
-    print("\n=== 10. 隔离性 ===")
+    print("\n=== 14. 隔离性 ===")
     prod = C.connect(C.DEFAULT_DB)
     n = prod.execute("SELECT COUNT(*) FROM script").fetchone()[0]
     prov = prod.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
