@@ -1,17 +1,24 @@
 # -*- coding: utf-8 -*-
-"""第 3 / 4 阶段：生成参考图（定妆照 与 三视图）。
+"""第 3 / 4 阶段：生成参考图（人物素材 / 场景素材 / 道具素材）。
 
-两个阶段共用一个脚本，用 --phase 区分——它们的流程完全相同，只是
+三个子阶段共用一个脚本，用 --phase 区分——流程完全相同，只是
 「给谁出图」和「出哪些视角」不同：
 
   第 3 阶段  --phase characters  人物素材：大头照 + 全身照
   第 4 阶段  --phase scenes      场景素材：正视图 + 俯视图 + 站位图
-             --phase props       道具素材
+             --phase props       道具素材：孤立照片
 
-分级的成本含义：main 出 4 张、secondary 出 1 张、background 出 0 张。
+分级的成本含义（按 kind 不同）：
+  character  main=2 张 / secondary=1 张 / background=0 张
+  location   main=3 张 / secondary=2 张 / background=0 张
+  prop       main=1 张 / secondary=1 张 / background=0 张
 
-**三视图以定妆照为参考图生成（图生图）**，这是刻意的：纯文生图无法保证
-三个角度是同一个实体。定妆照是锚点，三视图从锚点长出来。
+**派生视角以基底视角为参考图生成（图生图）**，这是刻意的：纯文生图无法保证
+是同一个实体。顺序是「全身照 → 大头照」「正视图 → 俯视图/站位图」——
+基底是锚点，派生从锚点长出来。
+
+⚠️ **本脚本原来出 front/side/back「三视图」，已废弃**（官方明确会引发双胞胎）。
+文件头下方有完整说明。
 
 用法：
   python pipeline/stage_refs.py --episode-id 1 --phase characters

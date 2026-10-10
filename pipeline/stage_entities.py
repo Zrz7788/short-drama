@@ -2,8 +2,8 @@
 """第 2 阶段：从剧本提取实体（人物 / 场景 / 道具）并分级。
 
 产出写入 entity 表。**分级是本阶段的核心产出**——它直接决定后面要出多少张图：
-  main       定妆照 + 三视图   = 每个 4 张
-  secondary  只出定妆照        = 每个 1 张
+  main       大头照 + 全身照   = 每个 2 张
+  secondary  只出全身照        = 每个 1 张
   background 不出图            = 0 张
 
 实体挂在 project 下（全剧共享），所以跨集重跑是幂等的：同名同类的会被更新。
@@ -171,7 +171,7 @@ def main():
     if row:
         detail += "，约 ¥%.1f（按 ¥%.2f/张估）" % (images * row["unit_price"], row["unit_price"])
     rep.add("出图工作量预估", True, detail)
-    rep.info("main=定妆照+三视图(4张)  secondary=只出定妆照(1张)  background=不出图")
+    rep.info("main=大头照+全身照(2张)  secondary=只出全身照(1张)  background=不出图")
 
     if args.dry_run:
         rep.info("dry-run：未写库")
