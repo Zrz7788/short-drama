@@ -28,11 +28,12 @@ pipeline/           管线阶段脚本
   stage_storyboard.py 第 5 阶段：生成分镜（含按镜抽卡策略）
   stage_prompts.py    第 6 阶段：提示词定稿（确定性组装，不走 LLM）
   stage_firstframes.py 第 7 阶段：生成首帧图（关键帧）
+  stage_video.py      第 8 阶段：视频生成（draft / direct / final 三种模式）
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
   assemble.py         第 10 阶段：拼接成集、可选烧字幕
   selftest.py         管线端到端自检（合成素材 + 临时库）
   selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
-  selftest_ark.py     第 3/4/7 阶段自检（本地假 Ark 服务 + 临时库）
+  selftest_ark.py     第 3/4/7/8 阶段自检（本地假 Ark 服务 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
@@ -182,7 +183,7 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 | **5 生成分镜** | `python pipeline\stage_storyboard.py --episode-id N` | `shot`、`shot_entity` | ✅ |
 | **6 提示词定稿** | `python pipeline\stage_prompts.py --episode-id N` | `shot.prompt`、`negative_prompt` | ✅ |
 | 7 首帧图 | `python pipeline\stage_firstframes.py --episode-id N` | `shot.keyframe_path` | ✅ |
-| 8 视频生成 | 待写 | `generation` | ⏳ 待密钥 |
+| 8 视频生成 | `python pipeline\stage_video.py --episode-id N --mode draft\|direct\|final` | `generation` | ✅ |
 | **9 抽帧与衔接** | `python pipeline\frames.py --episode-id N` | `*_first/last.png`、`continues_from` | ✅ |
 | **10 拼接与字幕** | `python pipeline\assemble.py --episode-id N [--srt F]` | `out/E0N.mp4`、`asset` | ✅ |
 
@@ -272,6 +273,41 @@ python pipeline\stage_firstframes.py --episode-id 1 --dry-run     # 先看张数
 python pipeline\stage_firstframes.py --episode-id 1 --take 2      # 每镜抽 2 张挑
 python pipeline\stage_firstframes.py --episode-id 1 --only 3,4,5  # 只重做难镜头
 ```
+
+### 第 8 阶段的要点：三段式，把选择留在便宜的地方
+
+视频生成分三种模式，对应 Draft 工作流的三段：
+
+| 模式 | 处理谁 | 分辨率 | 每条成本 |
+|---|---|---|---|
+| `--mode draft` | `strategy='draft'` 的镜头 | 480p 样片 | 时长 × ¥0.26/秒 |
+| `--mode direct` | `strategy='direct'` 的镜头 | 1080p 直出 | 时长 × ¥1.45/秒 |
+| `--mode final` | 有样片的镜头 | 1080p 成片 | 时长 × ¥1.45/秒 |
+
+**为什么不一键到底**：样片便宜、成片贵。把选择留在便宜的那一段——draft 阶段
+可以放心多抽，final 阶段每个镜头只出一次。
+
+```powershell
+python pipeline\stage_video.py --episode-id 1 --mode draft --dry-run
+python pipeline\stage_video.py --episode-id 1 --mode draft --max-cost 200
+python pipeline\stage_video.py --episode-id 1 --mode final --pick 3:2,5:1
+```
+
+**花钱保护**：`--max-cost` 超过预算直接中止。`price_book` 缺价目时**拒绝在未知花费
+下继续**，而不是把成本记 0 然后闷头跑。
+
+出片用的输入图按这个顺序解析：
+
+1. 该镜 `continues_from` 有值 → 用**上一镜的尾帧**（续接，保证跨镜头连续）
+2. 否则用该镜的 `keyframe_path`（第 7 阶段的关键帧）
+3. 都没有 → 纯文生视频，会明确提示（一致性最差）
+
+其他行为：失败的调用也写一条 `generation` 记录并带错误信息；没有指定选中项时，
+第一条成功的成片会自动设为 `selected_generation_id`，避免拼片时无从下手。
+
+> ⚠️ **一处未核实的字段名**：官方文档只说"通过样片对应的 ID 发起成片生成"，
+> **没有公布字段叫什么**。`ark.DRAFT_REF_FIELD`（默认 `draft_task_id`）是推测值，
+> 改这一处即可。第一次真实调用若不对，原始响应会落在 `.tools/ark-debug/`。
 
 ### 第 5 阶段的要点：抽卡策略
 
@@ -423,9 +459,10 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
 | ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
 | 第 1/2/5/6 阶段脚本 | ✅ 剧本、实体分级、分镜、提示词定稿，49 项自检通过 |
-| 第 3/4/7 阶段脚本 | ✅ 定妆照、三视图、首帧图；Ark 客户端字段名取自真实实现，49 项自检通过 |
+| 第 3/4/7/8 阶段脚本 | ✅ 定妆照、三视图、首帧图、视频生成；Ark 字段名取自真实实现，76 项自检通过 |
 | 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
 | 全量验收 | ✅ `python tools\verify.py`，32 项 |
+| **十个阶段脚本** | ✅ **全部写完并通过自检** |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
-| Ark API Key | ⏳ 待提供，之后可跑第 8 阶段的真实生成 |
-| 第 8 阶段脚本 | ⏳ 待写（视频生成：draft / direct / final 三种模式） |
+| Ark API Key | ⏳ **唯一剩余项**：插上钥匙即可跑真实生成 |
+| 真实 API 验证 | ⏳ 视频任务的响应结构与 draft 关联字段名尚未对真实服务验证过 |

@@ -222,8 +222,14 @@ def generate_image(prompt, size="2K", reference=None, references=None, model=Non
 def create_video_task(prompt, model=None, ratio="9:16", duration=4,
                       resolution="1080p", draft=False, reference_image=None,
                       generate_audio=True, watermark=False, extra_text=None,
+                      sample_task_id=None, seed=None,
                       base_url=None, api_key=None, timeout=120, retries=2):
-    """创建视频生成任务，返回 {"task_id":..., "model":..., "raw":...}"""
+    """创建视频生成任务，返回 {"task_id":..., "model":..., "raw":...}
+
+    sample_task_id 用于 Draft 流程的第二段：把选中的样片 ID 传进去，
+    模型会复用该样片的提示词、参考素材与 seed 做二次推理。
+    字段名见 DRAFT_REF_FIELD 的说明（未核实）。
+    """
     cfg = require_key(api_key)
     model = model or cfg["video_model"]
     content = [{"type": "text",
@@ -245,6 +251,10 @@ def create_video_task(prompt, model=None, ratio="9:16", duration=4,
     }
     if draft:
         body["draft"] = True
+    if sample_task_id:
+        body[DRAFT_REF_FIELD] = sample_task_id
+    if seed is not None:
+        body["seed"] = int(seed)
 
     resp = _post(cfg["base_url"] + "/contents/generations/tasks", body,
                  cfg["api_key"], timeout, retries, "video-create")
@@ -261,6 +271,14 @@ def get_video_task(task_id, base_url=None, api_key=None, timeout=60):
     return _get("%s/contents/generations/tasks/%s" % (cfg["base_url"], task_id),
                 cfg["api_key"], timeout, "video-get")
 
+
+# Draft → 成片 的关联字段名。
+#
+# ⚠️ 官方文档只说"选中满意的样片后，通过样片对应的 ID 发起 1080P 成片生成"，
+# **没有公布这个字段叫什么**。这里按最可能的写法发送。
+# 若真实 API 用别的名字，改这一处即可——响应结构不符时 _post 会把原始响应
+# 落盘到 .tools/ark-debug/，第一次真实调用就能定位。
+DRAFT_REF_FIELD = "draft_task_id"
 
 TERMINAL = ("succeeded", "success", "failed", "error", "cancelled", "canceled", "expired")
 

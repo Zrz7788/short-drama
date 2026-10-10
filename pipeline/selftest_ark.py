@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""第 3/4/7 阶段的端到端自检。
+"""第 3/4/7/8 阶段的端到端自检。
 
-在本地起一个**假的火山方舟服务**，让 stage_refs.py 与 stage_firstframes.py
-真跑一遍：请求组装 -> 图片下载 -> 落库 -> 成本记账。
+在本地起一个**假的火山方舟服务**，让 stage_refs.py、stage_firstframes.py 与
+stage_video.py 真跑一遍：请求组装 -> 任务创建 -> 轮询 -> 下载 -> 落库 -> 成本记账。
 
 刻意覆盖几种真实会遇到的坏情况：
   - 响应结构不符预期（防御式解析应把原始响应落盘并给出可读错误）
@@ -32,7 +32,7 @@ TEST_ROOT = os.path.join(C.ROOT, ".tools", "ark-test")
 TEST_DB = os.path.join(TEST_ROOT, "test.db")
 TEST_ASSETS = os.path.join(TEST_ROOT, "assets")
 
-rep = C.Report("第 3/4/7 阶段自检")
+rep = C.Report("第 3/4/7/8 阶段自检")
 
 ENTITIES = [
     ("character", "林薇", "main", "32岁女性，东亚面孔，齐肩黑直发，杏眼，左眉尾浅疤"),
@@ -43,6 +43,7 @@ ENTITIES = [
 ]
 
 PNG = None
+VIDEO = None
 
 
 def make_png():
@@ -53,8 +54,24 @@ def make_png():
     return buf.getvalue()
 
 
+def make_mp4():
+    """用 ffmpeg 造一段真 MP4；没有 ffmpeg 时退化成占位字节。"""
+    out = os.path.join(TEST_ROOT, "seed.mp4")
+    if not os.path.exists(os.path.join(C.ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")):
+        return b"\x00" * 2048, "占位字节（未装 ffmpeg）"
+    r = C.run_ffmpeg(["-f", "lavfi", "-i", "testsrc=size=270x480:rate=24:duration=1",
+                      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                      os.path.relpath(out, C.ROOT).replace("\\", "/")], cwd=C.ROOT)
+    if r.returncode != 0 or not os.path.exists(out):
+        return b"\x00" * 2048, "占位字节（ffmpeg 失败）"
+    with open(out, "rb") as f:
+        return f.read(), "真 MP4"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     requests = []
+    video_requests = []
+    video_polls = {}
     state = {"mode": "ok", "n429": 0}
 
     def _send(self, code, blob, ctype="application/json"):
@@ -68,10 +85,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
 
     def do_GET(self):
+        if self.path.startswith("/mock/video"):
+            return self._send(200, VIDEO, "video/mp4")
         if self.path.startswith("/mock/"):
-            self._send(200, PNG, "image/png")
-        else:
-            self._json(404, {"error": "not found"})
+            return self._send(200, PNG, "image/png")
+        if "/contents/generations/tasks/" in self.path:
+            tid = self.path.rsplit("/", 1)[-1].split("?")[0]
+            Handler.video_polls[tid] = Handler.video_polls.get(tid, 0) + 1
+            port = self.server.server_address[1]
+            # 第一次返回 running，之后 succeeded —— 真实服务就是这样异步的
+            if Handler.video_polls[tid] < 2:
+                return self._json(200, {"id": tid, "status": "running"})
+            return self._json(200, {
+                "id": tid, "status": "succeeded",
+                "content": {"video_url": "http://127.0.0.1:%d/mock/video.mp4" % port},
+            })
+        return self._json(404, {"error": "not found"})
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -80,12 +109,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8"))
         except ValueError:
             body = {"_raw": raw[:200].decode("utf-8", "replace")}
-        Handler.requests.append({
-            "path": self.path,
-            "auth": self.headers.get("Authorization"),
-            "body": body,
-        })
+        rec = {"path": self.path, "auth": self.headers.get("Authorization"), "body": body}
 
+        if "/contents/generations/tasks" in self.path:
+            Handler.video_requests.append(rec)
+            if Handler.state["mode"] == "video_bad":
+                # 创建成功但响应里没有任务 id —— 防御式解析该给出可读错误
+                return self._json(200, {"something": "else"})
+            if Handler.state["mode"] == "401":
+                return self._json(401, {"error": {"code": "AuthenticationError",
+                                                  "message": "the API key is invalid"}})
+            return self._json(200, {
+                "id": "cgt-%04d" % len(Handler.video_requests),
+                "model": body.get("model", ""),
+            })
+
+        Handler.requests.append(rec)
         mode = Handler.state["mode"]
         if mode == "401":
             return self._json(401, {"error": {"code": "AuthenticationError",
@@ -125,7 +164,7 @@ def run_stage(args, base_url, api_key="test-key", assets=None):
 
 
 def main():
-    global PNG
+    global PNG, VIDEO
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
@@ -134,9 +173,11 @@ def main():
     if os.path.isdir(TEST_ROOT):
         shutil.rmtree(TEST_ROOT)
     os.makedirs(TEST_ROOT)
+    VIDEO, video_note = make_mp4()
 
     print("=== 0. 临时资源 ===")
     rep.add("构造测试 PNG", len(PNG) > 0, "%d 字节" % len(PNG))
+    rep.add("构造测试视频素材", len(VIDEO) > 0, "%s，%d 字节" % (video_note, len(VIDEO)))
 
     print("\n=== 1. 假 Ark 服务 ===")
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -348,8 +389,151 @@ def main():
             os.path.isdir(os.path.join(TEST_ASSETS, "keyframes")),
             os.path.relpath(os.path.join(TEST_ASSETS, "keyframes"), C.ROOT))
 
-    # ---- 8. 401 鉴权失败 ----
-    print("\n=== 8. 401 应提示检查 key 与模型权限 ===")
+    # ---- 8. 第 8 阶段：视频生成 ----
+    print("\n=== 8. 第 8 阶段 stage_video.py ===")
+    con = C.connect(TEST_DB)
+    # 前 3 镜设为 draft 策略各抽 2 次；再加一镜 direct 策略
+    con.execute("UPDATE shot SET strategy='draft', draws_planned=2 WHERE episode_id=?",
+                (eid,))
+    sid4 = con.execute(
+        "INSERT INTO shot (episode_id, seq, duration_s, shot_size, camera_move,"
+        " description, action, lighting, prompt, strategy, draws_planned) "
+        "VALUES (?,4,4,'全景','固定','第4镜','动作','自然光','【提示词】第4镜 空镜','direct',1)",
+        (eid,)).lastrowid
+    # 让第 2 镜续接第 1 镜，并造一个尾帧文件，验证输入图解析顺序
+    last_rel = os.path.join(".tools", "ark-test", "assets", "frames", "E01S001_last.png")
+    os.makedirs(os.path.dirname(C.abs_path(last_rel)), exist_ok=True)
+    with open(C.abs_path(last_rel), "wb") as f:
+        f.write(PNG)
+    s1 = con.execute("SELECT id FROM shot WHERE episode_id=? AND seq=1", (eid,)).fetchone()["id"]
+    s2 = con.execute("SELECT id FROM shot WHERE episode_id=? AND seq=2", (eid,)).fetchone()["id"]
+    con.execute("UPDATE shot SET last_frame_path=? WHERE id=?", (last_rel, s1))
+    con.execute("UPDATE shot SET continues_from=? WHERE id=?", (s1, s2))
+    con.commit()
+    con.close()
+    rep.add("分镜策略与续接关系已备好", True, "draft×3 + direct×1，S02 续接 S01")
+
+    # 8.1 dry-run
+    Handler.video_requests.clear()
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "draft",
+                    "--dry-run"], base)
+    rep.add("dry-run 退出码 0", p.returncode == 0, C.tail(p.stderr, 50))
+    rep.add("dry-run 未提交任何任务", len(Handler.video_requests) == 0,
+            "%d 次" % len(Handler.video_requests))
+    rep.add("dry-run 给出预估成本", "预估成本" in p.stdout,
+            next((l.strip() for l in p.stdout.splitlines() if "预估成本" in l), "")[:56])
+
+    # 8.2 预算熔断
+    Handler.video_requests.clear()
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "draft",
+                    "--max-cost", "0.01"], base)
+    rep.add("超预算时中止", p.returncode != 0 and "超过 --max-cost" in p.stdout,
+            next((l.strip() for l in p.stdout.splitlines() if "max-cost" in l), "")[:56])
+    rep.add("熔断时不提交任务", len(Handler.video_requests) == 0,
+            "%d 次" % len(Handler.video_requests))
+
+    # 8.3 真跑 draft
+    Handler.video_requests.clear()
+    Handler.video_polls.clear()
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "draft",
+                    "--poll-interval", "0.05", "--poll-timeout", "30"], base)
+    rep.add("draft 退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    if p.returncode:
+        print("\n".join(p.stdout.strip().splitlines()[-16:]))
+    rep.add("3 镜 × 2 抽 = 6 个任务", len(Handler.video_requests) == 6,
+            "%d 个" % len(Handler.video_requests))
+    if Handler.video_requests:
+        b = Handler.video_requests[0]["body"]
+        rep.add("样片带 draft=true 且 480p",
+                b.get("draft") is True and b.get("resolution") == "480p",
+                "draft=%s resolution=%s" % (b.get("draft"), b.get("resolution")))
+        rep.add("content 带参考图",
+                any(c.get("type") == "image_url" for c in b.get("content", [])),
+                "content 段数 %d" % len(b.get("content", [])))
+        rep.add("带 duration 与 ratio",
+                b.get("duration") == 4 and b.get("ratio") == "9:16",
+                "duration=%s ratio=%s" % (b.get("duration"), b.get("ratio")))
+        rep.add("成片不携带 draft 关联字段",
+                "draft_task_id" not in b)
+
+    # 续接：第 2 镜的输入图应该是第 1 镜的尾帧
+    con = C.connect(TEST_DB)
+    n_draft = con.execute("SELECT COUNT(*) FROM generation WHERE is_draft=1 "
+                          "AND status='succeeded'").fetchone()[0]
+    rep.add("样片记录已落库", n_draft == 6, "%d 条" % n_draft)
+    miss = 0
+    for r in con.execute("SELECT local_path FROM generation WHERE local_path IS NOT NULL"):
+        if not os.path.exists(C.abs_path(r["local_path"])):
+            miss += 1
+    rep.add("样片文件都已下载", miss == 0, "%d 个缺失" % miss)
+    vcost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger "
+                        "WHERE category='video'").fetchone()[0]
+    rep.add("视频成本按秒计费（¥0.26/秒·样片）",
+            abs(vcost - 6 * 4 * 0.26) < 1e-6, "¥%.2f" % vcost)
+    rep.add("每个任务都轮询过（≥2 次）",
+            bool(Handler.video_polls) and all(v >= 2 for v in Handler.video_polls.values()),
+            "%d 个任务被轮询" % len(Handler.video_polls))
+    con.close()
+
+    # 8.4 direct 模式
+    Handler.video_requests.clear()
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "direct",
+                    "--poll-interval", "0.05", "--poll-timeout", "30"], base)
+    rep.add("direct 退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    rep.add("只处理 strategy=direct 的镜头", len(Handler.video_requests) == 1,
+            "%d 个任务" % len(Handler.video_requests))
+    if Handler.video_requests:
+        b = Handler.video_requests[0]["body"]
+        rep.add("直出是 1080p 且不带 draft",
+                b.get("resolution") == "1080p" and "draft" not in b,
+                "resolution=%s draft=%s" % (b.get("resolution"), b.get("draft")))
+    con = C.connect(TEST_DB)
+    sel = con.execute("SELECT selected_generation_id FROM shot WHERE id=?",
+                      (sid4,)).fetchone()["selected_generation_id"]
+    rep.add("单条成功时自动设为选中项", sel is not None, "selected=%s" % sel)
+    con.close()
+
+    # 8.5 final 模式：应带样片关联字段
+    Handler.video_requests.clear()
+    Handler.video_polls.clear()
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "final",
+                    "--poll-interval", "0.05", "--poll-timeout", "30"], base)
+    rep.add("final 退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
+    rep.add("3 个有样片的镜头各出一次成片", len(Handler.video_requests) == 3,
+            "%d 个任务" % len(Handler.video_requests))
+    rep.add("成片带样片关联字段（字段名未核实，改了 ark.DRAFT_REF_FIELD）",
+            bool(Handler.video_requests) and all(
+                "draft_task_id" in r["body"] for r in Handler.video_requests),
+            "示例值 %s" % (Handler.video_requests[0]["body"].get("draft_task_id")
+                           if Handler.video_requests else "-"))
+    rep.add("成片是 1080p 且不带 draft",
+            bool(Handler.video_requests) and all(
+                r["body"].get("resolution") == "1080p" and "draft" not in r["body"]
+                for r in Handler.video_requests))
+    con = C.connect(TEST_DB)
+    n_final = con.execute("SELECT COUNT(*) FROM generation WHERE is_draft=0 "
+                          "AND status='succeeded' AND resolution='1080p'").fetchone()[0]
+    rep.add("成片记录已落库", n_final == 4, "%d 条（含 direct 那条）" % n_final)
+    con.close()
+
+    # 8.6 创建成功但响应里没有任务 id
+    Handler.state["mode"] = "video_bad"
+    p = run_script("stage_video.py",
+                   ["--episode-id", str(eid), "--db", TEST_DB, "--mode", "draft",
+                    "--only", "1", "--force"], base)
+    blob = p.stdout + p.stderr
+    rep.add("拿不到任务 id 时报错并落盘原始响应",
+            p.returncode != 0 and "任务 id" in blob and "ark-debug" in blob,
+            next((l.strip() for l in blob.splitlines() if "任务 id" in l), "")[:56])
+    Handler.state["mode"] = "ok"
+
+    # ---- 9. 401 鉴权失败 ----
+    print("\n=== 9. 401 应提示检查 key 与模型权限 ===")
     Handler.state["mode"] = "401"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
                    "--force", "--only", "林薇"], base)
@@ -360,7 +544,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 8. 响应结构不符预期 ----
-    print("\n=== 9. 响应结构不符预期时应给出可读错误 ===")
+    print("\n=== 10. 响应结构不符预期时应给出可读错误 ===")
     Handler.state["mode"] = "bad_shape"
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "turnaround",
                    "--force", "--only", "林薇"], base)
@@ -375,7 +559,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 9. 429 限流退避重试 ----
-    print("\n=== 10. 429 应退避重试后成功 ===")
+    print("\n=== 11. 429 应退避重试后成功 ===")
     Handler.state["mode"] = "429"
     Handler.state["n429"] = 0
     Handler.requests.clear()
@@ -387,7 +571,7 @@ def main():
     Handler.state["mode"] = "ok"
 
     # ---- 10. 缺 key 时报错可操作 ----
-    print("\n=== 11. 未配置密钥时应给出可操作的提示 ===")
+    print("\n=== 12. 未配置密钥时应给出可操作的提示 ===")
     env = dict(os.environ, PYTHONIOENCODING="utf-8", DSH_ASSETS_ROOT=TEST_ASSETS)
     env.pop("ARK_API_KEY", None)
     p = subprocess.run([sys.executable, "-X", "utf8",
@@ -401,7 +585,7 @@ def main():
             next((l.strip() for l in blob.splitlines() if "ARK_API_KEY" in l), "")[:60])
 
     # ---- 11. 隔离性 ----
-    print("\n=== 12. 隔离性 ===")
+    print("\n=== 13. 隔离性 ===")
     prod = C.connect(C.DEFAULT_DB)
     n = prod.execute("SELECT COUNT(*) FROM entity_ref").fetchone()[0]
     m = prod.execute("SELECT COUNT(*) FROM image_generation").fetchone()[0]
