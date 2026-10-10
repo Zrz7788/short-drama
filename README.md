@@ -526,33 +526,93 @@ python pipeline\selftest_run.py      # 执行层自检，34 项
 
 ## 接入远程仓库
 
-SSH 密钥已生成在 `.tools/ssh/`（**不进 git**）。公钥：
+**远程已接好**：`git@github.com:Zrz7788/short-drama.git`（分支 `main`，公开仓库）。
+
+SSH 密钥在 `.tools/ssh/`（**不进 git**）。公钥：
 
 ```
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILb9uMXKJ8mw8DQlghO96GIplzPT40ft118xO1xdJQeM zrz@short-drama
 ```
 
-指纹（贴完可在 GitHub 上核对）：
+指纹（贴到 GitHub 后可以在页面上核对，确认加对了）：
 
 ```
-SHA256:o6SMoggislx/SKLWEQFCNuoexmll5awxinn2AqM+McU  (ED25519)
+SHA256:o6SMoggis1x/SKLWEQFCNuoexmll5awxinn2AqM+McU  (ED25519)
 ```
 
-**已实测**：`github.com:22`、`ssh.github.com:443`、`gitee.com:22/443` 全部可达，
-且用官方主机密钥校验通过（不是 TOFU）。只差登记公钥。
+> 注意那个 `s1x` 是**数字 1**，不是小写字母 l。这串里 `l`/`1`/`I` 极易看错，
+> 核对指纹是确认"加的就是本地这把"的唯一可靠办法。
 
-步骤：
+### 换一台机器要重做的三步
 
-1. 在 GitHub 新建**空**仓库——**不要勾** README / .gitignore / license，否则会和本地历史冲突
-   （Gitee 同理，也是 0.3 秒可达的替代方案）
-2. 把上面的公钥贴到 Settings → SSH and GPG keys
-3. 回到本机：
+**① 用 Windows 原生 ssh，别用 MinGit 自带的**
+
+`.tools/mingit/usr/bin/ssh.exe` 是 MSYS 程序，在受限沙箱下创建不了命名管道：
+
+```
+*** fatal error - couldn't create signal pipe, Win32 error 5
+```
+
+改用 `C:\Windows\System32\OpenSSH\ssh.exe`——它不是 MSYS 程序，不走命名管道。
+
+**② known_hosts 不存在时 ssh 会弹交互提示，把命令挂死**
+
+**不要靠 TOFU**（第一次连接盲信）。用官方接口写一份：
 
 ```powershell
-$git = "$PWD\.tools\mingit\cmd\git.exe"
-& $git remote add origin git@github.com:<用户名>/<仓库名>.git
-& $git push -u origin main
+# 取 api.github.com/meta 的 ssh_keys 字段，写成 .tools\ssh\known_hosts
+# 覆盖 github.com 与 ssh.github.com 两个主机名
 ```
+
+**③ push 需要一次提权**
+
+git 推送时会调用 MSYS 的 `sh.exe`，**同样撞命名管道**。这与用哪个 ssh 无关，
+是 git 自己的包装层。受限沙箱下必须提权一次；
+`git add/commit/config/remote` 等本地操作不受影响。
+
+### 配置（已生效，记在这里备查）
+
+```powershell
+& $git remote add origin git@github.com:Zrz7788/short-drama.git
+& $git config core.sshCommand '"C:/Windows/System32/OpenSSH/ssh.exe" -i "<repo>/.tools/ssh/id_ed25519" -o UserKnownHostsFile="<repo>/.tools/ssh/known_hosts" -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes'
+& $git branch -M main
+& $git push -u origin main      # ← 只有这一步需要提权
+```
+
+### 公开仓库：每次推之前要过一遍
+
+本仓库是**公开**的。推之前先确认：
+
+| 项 | 状态 |
+|---|---|
+| 私钥 / `.env` / `*.db` / `known_hosts` | 已被 `.gitignore` 挡住，`tools\verify.py` 会扫 |
+| `.tools/`（便携 git、ffmpeg、72MB 参照语料） | 整个目录不进 git |
+| **第三方技能包** | **不进 git**（见下） |
+
+**第三方技能包为什么不进 git**：`skills/techniques/` 下 12 个包来自 OpenMontage
+（**AGPL-3.0**）、2 个来自 ai-mandrama-skills（MIT）。本仓库公开，
+转发 AGPL 内容会带来许可义务，所以 `.gitignore` 里排除了包内容，
+**只保留出处清单** `skills/techniques/_provenance.json`——它记着每个包的
+来源、路径、许可、警告项，本身就是一份"用过什么、从哪来"的记录。
+
+换台机器 clone 下来后一条命令装回来：
+
+```powershell
+python tools\install_skill.py --restore
+```
+
+（优先走本地 tarball：那 12 个包逐个走 GitHub API 会很快撞上未认证限速 60 次/小时。
+tarball 不在时会说明怎么获取。）
+
+### 建仓库时的两个坑
+
+1. 必须建**空**仓库——**不要勾** README / .gitignore / license，否则和本地历史冲突
+2. 建完要**把公钥加到账号**（Settings → SSH and GPG keys），否则 push 报
+   `Permission denied (publickey)`——网络和主机密钥都对，纯粹是公钥没登记
+
+**Gitee 是备选**：`gitee.com` 从这台机器 SSH 只要 **0.16s**（GitHub 是 0.63s），
+而 **GitHub 的网页（443）在这台机器上超时**，只有 SSH（22）和 API 通。
+如果哪天 GitHub 网页打不开，转 Gitee 步骤一样，只换地址。
 
 第 3 步在受限沙箱下会报信号管道错误，需要更宽权限——见「本机环境要点」§2 的三种处理方式。
 后续每次 `push` 同理。
