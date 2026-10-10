@@ -199,6 +199,10 @@ def do_list(packs):
 
 def do_install(packs, names, dry_run):
     os.makedirs(DEST_ROOT, exist_ok=True)
+    # --tar 装的时候必须显式给来源与许可，否则标未知。
+    # 原来写死成 OpenMontage/AGPL-3.0，装 zenstory 的包时就记错了。
+    tar_source = getattr(ARGS, "source", None)
+    tar_license = ARGS.license_id
     prov = {}
     if os.path.exists(PROVENANCE):
         prov = json.load(open(PROVENANCE, encoding="utf-8"))
@@ -237,15 +241,22 @@ def do_install(packs, names, dry_run):
                 n += 1
             fm = parse_frontmatter(p["skill_md"]) or {}
             prov[name] = {
-                "source": "github.com/calesthio/OpenMontage",
+                # ⚠️ 这里原来把来源与许可**写死**成 OpenMontage / AGPL-3.0，
+                # 因为这条路径最初只为 OpenMontage 的 tarball 写的。
+                # 实测踩过：用 --tar 装 zenstory 的包时，它照抄了 OpenMontage + AGPL，
+                # 而实际是 zenstory-ai/drama-skills + MIT。
+                # **许可证记错是双向风险**：记成 AGPL 只是过度保守，
+                # 但反过来（AGPL 记成 MIT）就是侵权。
+                # 现在必须显式给 --source；不给就标未知并警告。
+                "source": tar_source or "**未知来源**（--tar 装的时候没给 --source）",
                 "path": ".agents/skills/" + name,
-                "license": "AGPL-3.0",
+                "license": tar_license or "unknown",
                 "files": n,
                 "bytes": p["bytes"],
                 # 与 --from-github 那条路保持同一套字段，读的人不用猜
                 "extras": [],
                 "description": fm.get("description", "")[:400],
-                "warnings": soft,
+                "warnings": soft + ([] if tar_source else ["来源未知，--restore 无法工作"]),
             }
             installed.append(name)
 
@@ -412,6 +423,8 @@ def main():
     global ARGS
     ap = argparse.ArgumentParser()
     ap.add_argument("--tar", help="本地 tarball 路径")
+    ap.add_argument("--source", dest="source",
+                    help="--tar 装的时候必须给：来源，如 github.com/zenstory-ai/drama-skills")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--install", nargs="*", default=[])
     ap.add_argument("--restore", action="store_true",
