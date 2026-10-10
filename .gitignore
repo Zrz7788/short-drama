@@ -1,0 +1,44 @@
+# ---- 便携工具链：不要提交 git 本体（解压后上百 MB）----
+.tools/
+
+# ---- 密钥与凭证：绝不提交 ----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials.json
+
+# ---- 生成的媒体素材：体积大、可复现，按需再决定是否入库 ----
+out/
+output/
+renders/
+assets/generated/
+*.mp4
+*.mov
+*.webm
+*.wav
+
+# ---- SQLite 生产库：可变二进制状态，不进 git ----
+# schema 与价目已由 db/schema.sql + db/init_db.py 保证可重建
+# 需要备份数据时跑 python db/export.py，导出的是文本，可以进 git
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# ---- DSH 运行时产物 ----
+*.tmp
+~$*
+Thumbs.db
+.DS_Store
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- Node ----
+node_modules/
