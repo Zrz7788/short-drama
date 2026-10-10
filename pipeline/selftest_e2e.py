@@ -38,6 +38,7 @@ TEST_ASSETS = os.path.join(TEST_ROOT, "assets")
 TEST_OUT = os.path.join(TEST_ROOT, "out")
 
 rep = C.Report("全链路集成测试")
+PROD0 = C.prod_fingerprint()   # 开工前记生产库指纹（供隔离性检查比对）
 
 
 def run(script, args, llm_base, ark_base):
@@ -310,12 +311,8 @@ def main():
     rep.add("成片已登记到 asset 表", n_asset == 1, "%d 条" % n_asset)
     con.close()
 
-    prod = C.connect(C.DEFAULT_DB)
-    untouched = (prod.execute("SELECT COUNT(*) FROM script").fetchone()[0] == 0
-                 and prod.execute("SELECT COUNT(*) FROM shot").fetchone()[0] == 0
-                 and prod.execute("SELECT COUNT(*) FROM generation").fetchone()[0] == 0)
-    prod.close()
-    rep.add("生产库全程未被写入", untouched)
+    _unch, _why = C.prod_unchanged(PROD0)
+    rep.add("生产库全程未被写入", _unch, _why)
     rep.add("真实 assets/ 未被创建",
             not os.path.exists(os.path.join(C.ROOT, "assets", "refs"))
             and not os.path.exists(os.path.join(C.ROOT, "assets", "keyframes")))

@@ -168,8 +168,6 @@ CREATE TABLE IF NOT EXISTS shot (
     shot_size       TEXT,                           -- 特写/近景/中景/全景
     camera_move     TEXT,                           -- 推/拉/摇/移/跟
     description     TEXT,                           -- 给人看的：情绪与意图
-    action          TEXT,                           -- 给模型看的：可见的动作与微表情
-    lighting        TEXT,                           -- 光线与氛围（第 6 阶段组装 prompt 用）
     dialogue        TEXT,                           -- 台词
     sfx             TEXT,                           -- 音效/环境音
     prompt          TEXT,                           -- 视频提示词
@@ -180,14 +178,33 @@ CREATE TABLE IF NOT EXISTS shot (
     draws_planned   INTEGER NOT NULL DEFAULT 3,     -- 计划抽卡次数
     status          TEXT    NOT NULL DEFAULT 'pending',
                     -- pending | approved | rejected | final
-    -- 首帧与衔接
-    keyframe_path    TEXT,                          -- 第 7 阶段生成的关键帧（出视频的锚点）
+    -- ⚠️ 以下列的顺序**必须与 COLUMN_MIGRATIONS 的追加顺序一致**，
+    -- 否则新建的库与升级上来的库列顺序不同（按名取值时无影响，
+    -- 但两个路径产出不同 schema 是隐患）。
     first_frame_path TEXT,                          -- 本镜实际用的首帧（续接时 = 上一镜尾帧）
     last_frame_path  TEXT,                          -- 本镜的尾帧图（供下一镜续接）
     continues_from   INTEGER REFERENCES shot(id) ON DELETE SET NULL,
                     -- 从哪个镜头的尾帧接过来；NULL = 本镜独立起头
     selected_generation_id INTEGER REFERENCES generation(id) ON DELETE SET NULL,
                     -- 抽卡多次后选中的那一条；拼片时以它为准
+    action          TEXT,                           -- 给模型看的：可见的动作与微表情
+    lighting        TEXT,                           -- 光线与氛围（第 6 阶段组装 prompt 用）
+    keyframe_path    TEXT,                          -- 第 7 阶段生成的关键帧（出视频的锚点）
+    -- 镜头语言（v5）。依据《拾音人第一集》工艺规范：25 镜逐镜拆解，
+    -- 每镜 15 个维度。原来只有景别/运镜/描述，撑不起一份可执行的镜头设计。
+    camera_angle     TEXT,                          -- 机位角度与高度
+    lens_mm          TEXT,                          -- 焦段
+    composition      TEXT,                          -- 构图（三分/对称/对角线/框架…）
+    dof              TEXT,                          -- 景深与光圈
+    movement_speed   TEXT,                          -- 运动速度与加减速曲线
+    color_temp       TEXT,                          -- 色温与光比
+    material_notes   TEXT,                          -- 材质要点（皮肤/织物/道具）
+    fg_mg_bg         TEXT,                          -- 前中后景关系（竖屏 70/30 法则）
+    transition       TEXT,                          -- 转场：硬切/闪白/黑场/J Cut
+    ambient_sound    TEXT,                          -- 环境声音与音效
+    entrance         TEXT,                          -- 8 种人物出场技巧之一
+    emotion          TEXT,                          -- 情绪标注：说话动词+标点+音色+语气
+    solo_generation  INTEGER NOT NULL DEFAULT 0,    -- 是否需单独生成（大特写/大特效）
     UNIQUE (episode_id, seq)
 );
 

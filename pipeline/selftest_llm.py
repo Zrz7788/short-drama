@@ -32,6 +32,7 @@ TEST_ROOT = os.path.join(C.ROOT, ".tools", "llm-test")
 TEST_DB = os.path.join(TEST_ROOT, "test.db")
 
 rep = C.Report("第 1/2/5/6 阶段自检")
+PROD0 = C.prod_fingerprint()   # 开工前记生产库指纹（供隔离性检查比对）
 
 # ---------------------------------------------------------------- 假模型的回复
 
@@ -476,7 +477,8 @@ def main():
     n = prod.execute("SELECT COUNT(*) FROM script").fetchone()[0]
     prov = prod.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
     prod.close()
-    rep.add("生产库未被写入", n == 0 and prov == 0, "script=%d entity=%d" % (n, prov))
+    _unch, _why = C.prod_unchanged(PROD0)
+    rep.add("生产库未被写入", _unch, _why)
 
     srv.shutdown()
     code = rep.finish()

@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -59,6 +59,42 @@ COLUMN_MIGRATIONS = [
     # 刻意与 first_frame_path 分开：后者的语义是"这一镜实际用的首帧"，
     # 会被第 9 阶段的续接逻辑覆盖（续接时它等于上一镜的尾帧）。
     ("shot", "keyframe_path", "ALTER TABLE shot ADD COLUMN keyframe_path TEXT"),
+    # ---- v5：镜头语言字段 ----
+    # 依据：用户提供的《拾音人第一集》工艺规范（25 镜逐镜拆解，每镜 15 个维度）
+    # 与《6、女频氛围感》《9、镜头语言》。原来的 shot 表只有景别/运镜/描述，
+    # 撑不起一份可执行的镜头设计，模型只能自由发挥。
+    ("shot", "camera_angle",
+     "ALTER TABLE shot ADD COLUMN camera_angle TEXT"),      # 机位角度与高度
+    ("shot", "lens_mm", "ALTER TABLE shot ADD COLUMN lens_mm TEXT"),   # 焦段
+    ("shot", "composition",
+     "ALTER TABLE shot ADD COLUMN composition TEXT"),       # 构图（三分/对称/对角线…）
+    ("shot", "dof", "ALTER TABLE shot ADD COLUMN dof TEXT"),  # 景深与光圈
+    ("shot", "movement_speed",
+     "ALTER TABLE shot ADD COLUMN movement_speed TEXT"),    # 运动速度与加减速
+    ("shot", "color_temp",
+     "ALTER TABLE shot ADD COLUMN color_temp TEXT"),        # 色温与光比
+    ("shot", "material_notes",
+     "ALTER TABLE shot ADD COLUMN material_notes TEXT"),    # 材质要点（皮肤/织物/道具）
+    ("shot", "fg_mg_bg",
+     "ALTER TABLE shot ADD COLUMN fg_mg_bg TEXT"),          # 前中后景关系（竖屏 70/30）
+    ("shot", "transition",
+     "ALTER TABLE shot ADD COLUMN transition TEXT"),        # 转场（硬切/闪白/黑场/J Cut）
+    ("shot", "ambient_sound",
+     "ALTER TABLE shot ADD COLUMN ambient_sound TEXT"),     # 环境声音与音效
+    # 8 种人物出场技巧之一（动态闯入 / 光影渐显 / 他人视线 / 前景遮挡 /
+    # 道具引入 / 先声后人 / 运镜移焦 / 局部先入）。
+    # 依据《11、人物出场8技巧》：画面平淡的根因是"让人物直接站在镜头里，
+    # 没有用镜头展现他的动机和目的"。
+    ("shot", "entrance",
+     "ALTER TABLE shot ADD COLUMN entrance TEXT"),
+    # 该镜使用的情绪标注：说话动词 + 标点策略 + 音色 + 语气语速。
+    # 依据《2、台词情绪力》：原生音频路线下，提示词是唯一的情绪控制手段。
+    ("shot", "emotion",
+     "ALTER TABLE shot ADD COLUMN emotion TEXT"),
+    # 是否需要**单独生成**（面部大特写、最大特效、首尾同构镜）。
+    # 依据《拾音人》§5.1：面部大特写单独生成单独抽卡，素材只给 1 张。
+    ("shot", "solo_generation",
+     "ALTER TABLE shot ADD COLUMN solo_generation INTEGER DEFAULT 0"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

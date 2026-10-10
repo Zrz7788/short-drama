@@ -182,6 +182,46 @@ def assets_root():
     return os.environ.get("DSH_ASSETS_ROOT") or ASSETS
 
 
+# 自检用来证明"没污染生产库"的几张表
+PROD_TABLES = ("project", "episode", "script", "scene", "entity", "shot",
+               "generation", "image_generation", "entity_ref", "asset")
+
+
+def prod_fingerprint(db=None):
+    """生产库的行数指纹。
+
+    自检开工前记一次、收工后比一次，**比"生产库必须为空"正确**——
+    生产库本来就该有真实作品；原来的断言在第一次真跑之后就必然失败
+    （实测：跑完第 1 阶段后三个自检各挂一项，而它们检查的其实是
+    "自检有没有污染生产库"，不是"生产库空不空"）。
+    """
+    try:
+        con = connect(db or DEFAULT_DB)
+    except Exception:
+        return {}
+    out = {}
+    for t in PROD_TABLES:
+        try:
+            out[t] = con.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0]
+        except Exception:
+            out[t] = None
+    con.close()
+    return out
+
+
+def prod_unchanged(before, after=None):
+    """指纹有没有变。返回 (是否未变, 说明文字)。"""
+    after = after if after is not None else prod_fingerprint()
+    diffs = []
+    for t in PROD_TABLES:
+        b, a = before.get(t), after.get(t)
+        if b is not None and a is not None and a != b:
+            diffs.append("%s %d→%d" % (t, b, a))
+    if diffs:
+        return False, "；".join(diffs)
+    return True, "与开工前一致（%d 张表）" % len(PROD_TABLES)
+
+
 def frame_paths(episode_seq, shot_seq):
     """抽帧产物路径。返回相对仓库根的路径，便于存库与迁移。"""
     d = os.path.join(assets_root(), "frames")

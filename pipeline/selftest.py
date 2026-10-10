@@ -26,6 +26,7 @@ TEST_ASSETS = os.path.join(TEST_ROOT, "assets")
 TEST_OUT = os.path.join(TEST_ROOT, "out")
 
 rep = C.Report("管线工具链自检")
+PROD0 = C.prod_fingerprint()   # 开工前记生产库指纹（供隔离性检查比对）
 
 
 def stage(script, args):
@@ -189,10 +190,8 @@ def main():
 
     # ---- 确认没碰生产库 ----
     print("\n--- 隔离性检查 ---")
-    prod = C.connect(C.DEFAULT_DB)
-    n = prod.execute("SELECT COUNT(*) FROM episode").fetchone()[0]
-    prod.close()
-    rep.add("生产库未被写入（episode 仍为 0）", n == 0, "%d 行" % n)
+    _unch, _why = C.prod_unchanged(PROD0)
+    rep.add("生产库未被写入", _unch, _why)
     rep.add("真实 assets/frames 未被创建",
             not os.path.exists(os.path.join(C.ROOT, "assets", "frames")),
             os.path.join("assets", "frames"))
