@@ -163,7 +163,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 def run_stage(script, args, base_url=None):
-    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8",
+               DSH_NO_DOTENV="1")   # 不读工作区 .env，保持自检密闭
     if base_url:
         env.update(LLM_BASE_URL=base_url, LLM_API_KEY="test-key", LLM_MODEL="mock-model")
     p = subprocess.run([sys.executable, "-X", "utf8",
@@ -341,7 +342,8 @@ def main():
 
     # ---- 9. 缺配置时的报错是否可操作 ----
     print("\n=== 9. 未配置 LLM 时应给出可操作的提示 ===")
-    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONIOENCODING="utf-8",
+               DSH_NO_DOTENV="1")   # 不读工作区 .env，保持自检密闭
     env.pop("LLM_MODEL", None)
     env.pop("LLM_API_KEY", None)
     env.pop("ARK_API_KEY", None)

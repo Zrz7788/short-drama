@@ -157,6 +157,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def run_script(script, args, base_url, api_key="test-key", assets=None):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    # 自检必须是**密闭的**：不能被工作区 .env 里的真实凭证影响，
+    # 否则"未配置时报错"这类反向用例会失效（实测踩过：加了 .env 之后
+    # 两个自检各挂掉一部分）。DSH_NO_DOTENV 让 common.load_env() 什么都不做。
+    env["DSH_NO_DOTENV"] = "1"
     if base_url:
         env["ARK_BASE_URL"] = base_url
     env["ARK_API_KEY"] = api_key
@@ -201,6 +205,22 @@ def main():
                        encoding="utf-8", errors="replace")
     rep.add("临时库建立", p.returncode == 0)
     con = C.connect(TEST_DB)
+    # 给**当前代码默认用的模型**补价目。
+    #
+    # 之前这里依赖 init_db 的种子价目，而种子写的是 doubao-seedream-4-0-250828。
+    # 默认模型一改（换成本账号真正开通的 seedream-5-0-pro），种子就对不上，
+    # 成本静默记 0，三条断言全挂。测试不该依赖生产默认值——
+    # 所以这里按 ark.py 的实际默认值补，默认再变也不会挂。
+    from pipeline import ark as _A
+    for mid, unit, price in ((_A.MODEL_IMAGE, "image", 0.20),
+                             (_A.MODEL_VIDEO_25, "second", 1.45)):
+        ex = con.execute("SELECT 1 FROM price_book WHERE model_id=? AND unit=?",
+                         (mid, unit)).fetchone()
+        if not ex:
+            con.execute("INSERT INTO price_book (model_id, variant, unit, unit_price,"
+                        " confidence, source) VALUES (?,?,?,?,'high','自检种子')",
+                        (mid, "自检", unit, price))
+    con.commit()
     pid = con.execute("INSERT INTO project (name) VALUES ('Ark 自检')").lastrowid
     eid = con.execute("INSERT INTO episode (project_id, seq, target_seconds) "
                       "VALUES (?,1,80)", (pid,)).lastrowid
@@ -580,7 +600,8 @@ def main():
 
     # ---- 10. 缺 key 时报错可操作 ----
     print("\n=== 12. 未配置密钥时应给出可操作的提示 ===")
-    env = dict(os.environ, PYTHONIOENCODING="utf-8", DSH_ASSETS_ROOT=TEST_ASSETS)
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", DSH_ASSETS_ROOT=TEST_ASSETS,
+               DSH_NO_DOTENV="1")   # 不读工作区 .env，否则这里清不掉 key
     env.pop("ARK_API_KEY", None)
     p = subprocess.run([sys.executable, "-X", "utf8",
                         os.path.join(C.ROOT, "pipeline", "stage_refs.py"),

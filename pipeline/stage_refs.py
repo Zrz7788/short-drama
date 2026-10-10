@@ -141,6 +141,8 @@ def main():
                     help="连 background 级实体也出图（默认不出）")
     ap.add_argument("--force", action="store_true", help="已存在的视角也重新生成")
     ap.add_argument("--size", default="2K", help="1K/2K/4K 或 '宽x高'（默认 2K）")
+    ap.add_argument("--allow-unknown-price", action="store_true",
+                    help="价目缺失时也继续（账本会失真，仅用于跑通流程）")
     A.add_ark_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -209,8 +211,25 @@ def main():
     rep.add("待生成张数", True, "%d 张%s" % (planned, "（dry-run）" if args.dry_run else ""))
     if price is not None:
         rep.add("预估成本", True, "约 ¥%.2f（¥%.2f/张）" % (planned * price, price))
+    elif not args.allow_unknown_price:
+        # **拒绝在未知花费下继续。**
+        # 原来这里只打一句"成本将记 0"就接着跑。后果是：跑 80 集、生成几千张图，
+        # cost_ledger 上写着 ¥0，你完全不知道花了多少。
+        # 这与 cost-governor 里给视频定的规矩应当一致——当时只对图片手软了。
+        rep.add("价目缺失时拒绝继续", False,
+                "price_book 里没有 %s 的图片单价" % cfg["image_model"])
+        print()
+        print("拒绝在未知花费下继续——按 0 记账会让账本彻底失真。")
+        print("补价目（去火山方舟控制台的模型计费页查单价）：")
+        print("  INSERT INTO price_book (model_id, variant, unit, unit_price,"
+              " confidence, source)")
+        print("    VALUES ('%s', '图片', 'image', <单价>, 'high', '控制台');"
+              % cfg["image_model"])
+        print("确实要在未知花费下继续（比如只想跑通流程）：加 --allow-unknown-price")
+        con.close()
+        return rep.finish()
     else:
-        rep.info("price_book 无 %s 的图片单价，成本将记 0，请补价目" % cfg["image_model"])
+        rep.info("已按 --allow-unknown-price 继续，本次成本记 0（账本会失真）")
 
     if not planned:
         rep.info("没有需要生成的视角（都已存在）。要重出请加 --force")

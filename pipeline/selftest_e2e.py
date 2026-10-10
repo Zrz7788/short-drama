@@ -46,6 +46,7 @@ def run(script, args, llm_base, ark_base):
         LLM_BASE_URL=llm_base, LLM_API_KEY="test-key", LLM_MODEL="mock-model",
         ARK_BASE_URL=ark_base, ARK_API_KEY="test-key",
         DSH_ASSETS_ROOT=TEST_ASSETS,
+        DSH_NO_DOTENV="1",   # 密闭：不读工作区 .env 的真实凭证
     )
     return subprocess.run([sys.executable, "-X", "utf8",
                            os.path.join(C.ROOT, "pipeline", script)] + args,
@@ -103,6 +104,17 @@ def main():
                        encoding="utf-8", errors="replace")
     rep.add("临时库建立", p.returncode == 0)
     con = C.connect(TEST_DB)
+    # 给**当前代码默认用的模型**补价目。种子里写的旧图片模型现在已不是默认值，
+    # 不补的话 stage_refs / stage_firstframes 会因"价目缺失"直接拒绝继续
+    # （那是刻意的安全行为），整个链路就断在这。
+    from pipeline import ark as _A
+    for mid, unit, price in ((_A.MODEL_IMAGE, "image", 0.20),
+                             (_A.MODEL_VIDEO_25, "second", 1.45)):
+        if not con.execute("SELECT 1 FROM price_book WHERE model_id=? AND unit=?",
+                           (mid, unit)).fetchone():
+            con.execute("INSERT INTO price_book (model_id, variant, unit, unit_price,"
+                        " confidence, source) VALUES (?,?,?,?,'high','自检种子')",
+                        (mid, "自检", unit, price))
     pid = con.execute("INSERT INTO project (name, logline, target_episode_seconds) "
                       "VALUES ('端到端自检剧','一条化验单引发的对峙',80)").lastrowid
     eid = con.execute("INSERT INTO episode (project_id, seq, target_seconds) "

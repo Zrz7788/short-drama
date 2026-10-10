@@ -78,6 +78,8 @@ def main():
     ap.add_argument("--take", type=int, default=1, help="每镜抽几张（默认 1）")
     ap.add_argument("--force", action="store_true", help="已有首帧也重出")
     ap.add_argument("--size", default="2K")
+    ap.add_argument("--allow-unknown-price", action="store_true",
+                    help="价目缺失时也继续（账本会失真，仅用于跑通流程）")
     A.add_ark_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -127,8 +129,23 @@ def main():
     if price is not None:
         rep.add("预估成本", True, "约 ¥%.2f（%d 张 × ¥%.2f）"
                 % (planned * price, planned, price))
+    elif not args.allow_unknown_price:
+        # 与 stage_refs 同一规矩：**拒绝在未知花费下继续**。
+        # 按 0 记账会让账本失真——而首帧图是全片抽卡最密集的一步，
+        # 这里失真最要命。
+        rep.add("价目缺失时拒绝继续", False,
+                "price_book 里没有 %s 的图片单价" % cfg["image_model"])
+        print()
+        print("拒绝在未知花费下继续。补价目：")
+        print("  INSERT INTO price_book (model_id, variant, unit, unit_price,"
+              " confidence, source)")
+        print("    VALUES ('%s', '图片', 'image', <单价>, 'high', '控制台');"
+              % cfg["image_model"])
+        print("确实要继续（只想跑通流程）：加 --allow-unknown-price")
+        con.close()
+        return rep.finish()
     else:
-        rep.info("price_book 无该图片模型单价，成本将记 0")
+        rep.info("已按 --allow-unknown-price 继续，本次成本记 0（账本会失真）")
 
     if not todo:
         rep.info("没有需要生成的镜头（都已有首帧）。要重出请加 --force")

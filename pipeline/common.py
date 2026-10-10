@@ -34,6 +34,10 @@ def load_env(path=None):
     文件是本机唯一可靠的传递方式，且 .env 已被 .gitignore 挡住。
     """
     p = path or ENV_FILE
+    # 自检要把"未配置时报错"这类反向用例跑起来，就不能被 .env 里的真凭证污染。
+    # 设 DSH_NO_DOTENV=1 即可让本函数什么都不做。
+    if os.environ.get("DSH_NO_DOTENV"):
+        return 0
     if not os.path.exists(p):
         return 0
     n = 0
