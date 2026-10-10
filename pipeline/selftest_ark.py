@@ -54,16 +54,24 @@ def make_png():
     return buf.getvalue()
 
 
-def make_mp4():
-    """用 ffmpeg 造一段真 MP4；没有 ffmpeg 时退化成占位字节。"""
-    out = os.path.join(TEST_ROOT, "seed.mp4")
-    if not os.path.exists(os.path.join(C.ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")):
+def make_mp4(root=None):
+    """用 ffmpeg 造一段真 MP4；没有 ffmpeg 时退化成占位字节。
+
+    root 可指定落盘目录（默认本模块的 TEST_ROOT）。别的自检复用本函数时
+    必须传自己的目录——否则目标目录不存在，ffmpeg 写不出去就退化成了占位字节，
+    而那会让抽帧/拼接阶段的测试失去意义。实测踩过。
+    """
+    root = root or TEST_ROOT
+    os.makedirs(root, exist_ok=True)
+    out = os.path.join(root, "seed.mp4")
+    exe = os.path.join(C.ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")
+    if not os.path.exists(exe):
         return b"\x00" * 2048, "占位字节（未装 ffmpeg）"
     r = C.run_ffmpeg(["-f", "lavfi", "-i", "testsrc=size=270x480:rate=24:duration=1",
                       "-c:v", "libx264", "-pix_fmt", "yuv420p",
                       os.path.relpath(out, C.ROOT).replace("\\", "/")], cwd=C.ROOT)
     if r.returncode != 0 or not os.path.exists(out):
-        return b"\x00" * 2048, "占位字节（ffmpeg 失败）"
+        return b"\x00" * 2048, "占位字节（ffmpeg 失败：%s）" % C.tail(r.stderr, 40)
     with open(out, "rb") as f:
         return f.read(), "真 MP4"
 
