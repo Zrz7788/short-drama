@@ -99,7 +99,7 @@ SELECT  model_id                                  AS 模型ID,
 FROM price_book
 ORDER BY model_id, variant, resolution;
 
--- 实体参考图齐备度。用途：跑「定妆照」「三视图」两阶段时，
+-- 实体参考图齐备度。用途：跑「人物素材」「场景素材」「道具素材」时，
 -- 一眼看出哪些实体还缺图、缺哪个视角、有没有指定主参考图。
 DROP VIEW IF EXISTS v_entity_readiness;
 CREATE VIEW v_entity_readiness AS

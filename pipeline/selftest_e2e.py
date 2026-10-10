@@ -142,11 +142,11 @@ def main():
             " ".join("%s=%d" % kv for kv in sorted(kinds.items())))
     con.close()
 
-    print("\n=== 3-4. 定妆照 → 三视图（Ark 图像阶段）===")
+    print("\n=== 3-4. 人物素材 → 场景素材（Ark 图像阶段）===")
     stage(rep, "第 3 阶段 定妆照", "stage_refs.py",
           ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"],
           llm_base, ark_base)
-    stage(rep, "第 4 阶段 三视图", "stage_refs.py",
+    stage(rep, "第 4 阶段 场景素材", "stage_refs.py",
           ["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes"],
           llm_base, ark_base)
     con = C.connect(TEST_DB)

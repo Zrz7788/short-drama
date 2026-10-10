@@ -260,7 +260,7 @@ def main():
             % (n_main, n_sec, n_bg))
 
     # ---- 3. 定妆照 ----
-    print("\n=== 3. 第 3 阶段 --phase portrait ===")
+    print("\n=== 3. 第 3 阶段 --phase characters（人物素材）===")
     Handler.requests.clear()
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "characters"], base)
     rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
@@ -310,8 +310,8 @@ def main():
     rep.add("background 级没有出图", bg_ref == 0, "%d 张" % bg_ref)
     con.close()
 
-    # ---- 4. 三视图 ----
-    print("\n=== 4. 第 4 阶段 --phase turnaround ===")
+    # ---- 4. 场景素材 ----
+    print("\n=== 4. 第 4 阶段 --phase scenes（场景素材）===")
     Handler.requests.clear()
     p = run_stage(["--episode-id", str(eid), "--db", TEST_DB, "--phase", "scenes"], base)
     rep.add("退出码 0", p.returncode == 0, C.tail(p.stderr, 60))
@@ -437,7 +437,7 @@ def main():
                         "WHERE category='image'").fetchone()[0]
     n_ok = con.execute("SELECT COUNT(*) FROM image_generation WHERE status='succeeded'"
                        ).fetchone()[0]
-    # 期望：定妆照 + 三视图 + --force 重出的定妆照 + 首帧图
+    # 期望：人物素材 + 场景素材 + --force 重出的人物素材 + 首帧图
     expect_imgs = want_portrait + want_turn + want_portrait + len(shot_plan)
     rep.add("成功出图总张数符合预期", n_ok == expect_imgs, "%d 张" % n_ok)
     rep.add("成本 = 成功张数 × 单价", abs(cost7 - n_ok * 0.20) < 1e-6,
