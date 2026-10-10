@@ -15,6 +15,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +30,14 @@ CAMERA_MOVES = {"固定", "推", "拉", "摇", "移", "跟", "升降"}
 ROLES = {"subject", "background", "prop"}
 STRATEGIES = {"draft", "direct"}
 
+# 运镜的"防崩坏说明"白名单。依据《运镜与分镜规范》的 50 条运镜库——
+# 这一项是我们原来完全缺的：模型很容易把运动做糊、做畸变，必须显式排除。
+CAMERA_LOCKS = {"匀速无卡顿", "画面无模糊拖影", "边缘无拉伸", "拉镜防畸变",
+                "摇镜防抖", "人物无重影", "画面无眩晕感", "建筑线条笔直无变形"}
+# "运镜四件套"：缺一项模型就只能自由发挥
+CAMERA_REQUIRED = ("camera_emotion", "movement_speed", "camera_lock",
+                   "camera_angle", "lens_mm", "composition", "dof")
+
 SPEC = {
     "shots": [{
         "scene_seq": int,
@@ -36,6 +45,13 @@ SPEC = {
         "duration_s": float,
         "shot_size": str,
         "camera_move": str,
+        "camera_emotion": str,
+        "movement_speed": str,
+        "camera_lock": str,
+        "camera_angle": str,
+        "lens_mm": str,
+        "composition": str,
+        "dof": str,
         "description": str,
         "action": str,
         "dialogue": L.OPTIONAL_STR,
@@ -100,6 +116,21 @@ def check_shots(con, ep, shots, scenes, entities):
             bad.append("%s shot_size=%s" % (tag, s["shot_size"]))
         if s["camera_move"] not in CAMERA_MOVES:
             bad.append("%s camera_move=%s" % (tag, s["camera_move"]))
+        # 运镜四件套：七个字段必须非空，否则模型只能自由发挥
+        for k in CAMERA_REQUIRED:
+            if not str(s.get(k) or "").strip():
+                bad.append("%s %s 为空" % (tag, k))
+        # 速度必须带数字——"缓慢""快速"这类形容词对模型没有约束力
+        spd = str(s.get("movement_speed") or "")
+        if spd and not re.search(r"\d", spd):
+            bad.append("%s movement_speed 里没有数字：%s" % (tag, spd[:30]))
+        # 防崩坏说明必须在白名单里（允许顿号连接多项）
+        lock = str(s.get("camera_lock") or "")
+        if lock:
+            parts = [x.strip() for x in re.split(r"[、,，]", lock) if x.strip()]
+            unknown = [x for x in parts if x not in CAMERA_LOCKS]
+            if unknown:
+                bad.append("%s camera_lock 含未知项：%s" % (tag, "、".join(unknown)))
         if s["strategy"] not in STRATEGIES:
             bad.append("%s strategy=%s" % (tag, s["strategy"]))
         if not (4 <= float(s["duration_s"]) <= 15):
@@ -152,11 +183,16 @@ def persist(con, ep, shots, by_seq, ent_by_name, dry):
         sid = con.execute(
             "INSERT INTO shot (episode_id, scene_id, seq, duration_s, shot_size,"
             " camera_move, description, action, lighting, dialogue, sfx, strategy,"
-            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
+            " camera_emotion, movement_speed, camera_lock, camera_angle, lens_mm,"
+            " composition, dof,"
+            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
             (ep["id"], by_seq[s["scene_seq"]], s["seq"], float(s["duration_s"]),
              s["shot_size"], s["camera_move"], s["description"], s["action"],
              s["lighting"], s.get("dialogue") or "", s.get("sfx") or "",
-             s["strategy"], int(s["draws_planned"]))).lastrowid
+             s["strategy"],
+             s["camera_emotion"], s["movement_speed"], s["camera_lock"],
+             s["camera_angle"], s["lens_mm"], s["composition"], s["dof"],
+             int(s["draws_planned"]))).lastrowid
         for e in s["entities"]:
             con.execute("INSERT OR IGNORE INTO shot_entity (shot_id, entity_id, role) "
                         "VALUES (?,?,?)", (sid, ent_by_name[e["name"]], e["role"]))

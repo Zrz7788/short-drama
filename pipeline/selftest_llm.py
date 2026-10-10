@@ -115,6 +115,14 @@ def build_storyboard():
             "duration_s": dur,
             "shot_size": size,
             "camera_move": cam,
+            # 运镜四件套：第 5 阶段校验要求这七项非空（缺一项模型就只能自由发挥）
+            "camera_emotion": "聚焦式推进" if cam == "推" else "陪伴式平移",
+            "movement_speed": "每秒 10-15 厘米，2 秒内完成",
+            "camera_lock": "匀速无卡顿、画面无模糊拖影",
+            "camera_angle": "平视",
+            "lens_mm": "85mm",
+            "composition": "三分法，人物在右三分线",
+            "dof": "极浅 f/1.8，背景虚化",
             "description": "第%d镜：%s" % (i, size),
             "action": "角色完成一个可见的动作，幅度适中，面部有细微表情变化",
             "dialogue": "你到底是谁？" if i == 7 else "",
@@ -437,7 +445,9 @@ def main():
     shutil.copy2(tpl, backup)
     try:
         with open(tpl, "w", encoding="utf-8") as f:
-            f.write("【景别】$shot_size 【运镜】$camera_move\n\n【动作】$action\n")
+            # 故意丢掉 $entity_block —— 逐字校验应当因此失败。
+            # 变量名要与当前模板一致，否则会先撞上"未知变量"，测的就不是逐字校验了。
+            f.write("【景别】$shot_size 【运镜】$camera_line\n\n【动作】$action\n")
         p = run_stage("stage_prompts.py", ["--episode-id", str(eid), "--db", TEST_DB])
         blob = p.stdout + p.stderr
         rep.add("模板丢掉实体块时报错退出", p.returncode != 0, "退出码 %d" % p.returncode)

@@ -205,6 +205,10 @@ CREATE TABLE IF NOT EXISTS shot (
     entrance         TEXT,                          -- 8 种人物出场技巧之一
     emotion          TEXT,                          -- 情绪标注：说话动词+标点+音色+语气
     solo_generation  INTEGER NOT NULL DEFAULT 0,    -- 是否需单独生成（大特写/大特效）
+    -- 运镜的情绪化命名与防崩坏说明（v6）。依据《运镜与分镜规范》：
+    -- 提示词模板固定为「命名 + 从X到Y + 速度(秒/帧) + 防崩坏说明 + 风格」。
+    camera_emotion   TEXT,                          -- 情绪化命名，如"聚焦式推进""压抑式下降"
+    camera_lock      TEXT,                          -- 防崩坏说明，如"匀速无卡顿""无模糊拖影"
     UNIQUE (episode_id, seq)
 );
 

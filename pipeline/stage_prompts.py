@@ -54,10 +54,28 @@ def entity_block(ents):
 
 
 def build(shot, ents):
+    # 运镜拼成一行：情绪化命名（命名）+ 基底运镜 + 速度 + 防崩坏说明。
+    # 依据《运镜与分镜规范》：同一个"推"，写成"聚焦式推进"就同时是动作描述
+    # 和情绪指令；速度必须带数字；防崩坏说明显式排除糊/畸变/抖动/重影。
+    cam_bits = [x for x in ((shot["camera_emotion"] or "").strip(),
+                            (shot["camera_move"] or "").strip()) if x]
+    cam = "".join(cam_bits) if cam_bits else "固定"
+    if (shot["movement_speed"] or "").strip():
+        cam += "，%s" % shot["movement_speed"].strip()
+    if (shot["camera_lock"] or "").strip():
+        cam += "，%s" % shot["camera_lock"].strip()
+
+    optics = "　".join(x for x in (
+        ("焦段 %s" % shot["lens_mm"].strip()) if (shot["lens_mm"] or "").strip() else "",
+        (shot["dof"] or "").strip()) if x) or "标准焦段"
+
     tpl = L.load_prompt(
         TEMPLATE,
         shot_size=shot["shot_size"],
-        camera_move=shot["camera_move"],
+        camera_line=cam,
+        optics_line=optics,
+        composition=(shot["composition"] or "").strip() or "三分法",
+        camera_angle=(shot["camera_angle"] or "").strip() or "平视",
         entity_block=entity_block(ents),
         action=(shot["action"] or "").strip() or "（未填动作）",
         description=(shot["description"] or "").strip(),
@@ -100,7 +118,9 @@ def main():
     print("集：第 %s 集 项目：%s\n" % (ep["seq"], ep["project"]))
 
     shots = con.execute(
-        "SELECT id, seq, duration_s, shot_size, camera_move, description, action,"
+        "SELECT id, seq, duration_s, shot_size, camera_move, camera_emotion,"
+              " movement_speed, camera_lock, camera_angle, lens_mm, composition, dof,"
+              " description, action,"
         " lighting, dialogue, sfx, strategy FROM shot WHERE episode_id=? ORDER BY seq",
         (ep["id"],)).fetchall()
     if not shots:

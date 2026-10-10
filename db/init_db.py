@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -95,6 +95,15 @@ COLUMN_MIGRATIONS = [
     # 依据《拾音人》§5.1：面部大特写单独生成单独抽卡，素材只给 1 张。
     ("shot", "solo_generation",
      "ALTER TABLE shot ADD COLUMN solo_generation INTEGER DEFAULT 0"),
+    # ---- v6：运镜的情绪化命名与防崩坏说明 ----
+    # 依据《运镜与分镜规范》（漫剧资源包）：
+    #   同一个"推镜头"，写成"聚焦式推进"就同时是动作描述和情绪指令。
+    #   提示词模板固定为「命名 + 从X到Y + 速度(秒/帧) + 防崩坏说明 + 风格」，
+    #   其中"速度"与"防崩坏说明"是我们原来完全缺的两样。
+    ("shot", "camera_emotion",
+     "ALTER TABLE shot ADD COLUMN camera_emotion TEXT"),
+    ("shot", "camera_lock",
+     "ALTER TABLE shot ADD COLUMN camera_lock TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

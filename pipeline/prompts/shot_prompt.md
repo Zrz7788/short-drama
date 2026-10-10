@@ -1,4 +1,7 @@
-【景别】$shot_size　【运镜】$camera_move　【画幅】9:16 竖屏
+【景别】$shot_size　【画幅】9:16 竖屏
+【运镜】$camera_line
+【光学】$optics_line
+【构图】$composition　机位：$camera_angle
 
 $entity_block
 
