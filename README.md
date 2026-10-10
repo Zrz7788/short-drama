@@ -35,13 +35,19 @@ pipeline/           管线阶段脚本
   selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
   selftest_ark.py     第 3/4/7/8 阶段自检（本地假 Ark 服务 + 临时库）
   selftest_e2e.py     全链路集成测试（十阶段串起来，产出真 MP4）
+pipeline_defs/      流水线清单（声明式契约）
+  short-drama.yaml   阶段、工件、工具、门禁、判据 —— 我们唯一那条流水线
+skills/             流水线自己的技能目录（**不是** .dsh/skills）
+  pipelines/short-drama/  各阶段导演技能 + 总编排
+  meta/                   门禁协议、审查、预算、一致性
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
 tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
   setup_ffmpeg.py    下载便携版 ffmpeg
-  verify.py          全量验收（33 项检查，含全链路集成）
+  validate_manifest.py  流水线清单校验（零依赖，查结构 + 契约）
+  verify.py          全量验收（含全链路集成）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
@@ -376,6 +382,65 @@ python pipeline\stage_prompts.py --episode-id 1 --show 3   # 打印第 3 镜的�
 **端到端自检**：`python pipeline\selftest.py` —— 用 ffmpeg 合成假素材 + 临时库，
 真跑一遍两个阶段（含"参数不一致 → 自动重编码"和"中文字幕烧录"），
 并确认没碰生产库与真实 `assets/`。共 28 项。
+
+## 流水线清单（声明式契约）
+
+`pipeline_defs/short-drama.yaml` 用**声明式**方式定义整条流程：阶段、依赖的工件、
+可用工具、门禁开关、审查关注点、成功判据。形态参照了
+[OpenMontage](https://github.com/calesthio/OpenMontage) 的 `pipeline_defs` 契约。
+
+```yaml
+stages:
+  - name: keyframes
+    skill: pipelines/short-drama/keyframe-director
+    required_artifacts_in: [shot_prompts, reference_sheets]
+    produces: [keyframes]
+    tools_available: [stage_firstframes]
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:                     # 给人看的审查关注点
+      - 这是成片前最后一个便宜的关卡
+    success_criteria:                 # 机器可判的判据
+      - 每个 shot 的 keyframe_path 非空且文件存在
+    governance:
+      - 禁止为了「挣得」这次审查而先跑视频
+```
+
+几个从它那里学来、我们认为值钱的设计：
+
+- **工件（artifact）驱动**：阶段之间靠具名工件串起来，不靠隐式状态。
+  校验器会做拓扑检查——某个阶段依赖的工件，前面必须真的有阶段产出它
+- **`review_focus` 与 `success_criteria` 分离**：前者给人看，后者给机器判
+- **`decision_log` 是一等工件**：每次选择记下备选与理由
+- **门禁是逐道的**：之前批过不覆盖后面的门禁，除非当时就把预授权记进 `decision_log`
+- **`checkpoint_required` / `human_approval_default` 两个开关**：前者决定要不要存档，
+  后者决定要不要停下问人
+
+### 与 `.dsh/skills/` 的区别
+
+两个 `skills` 目录是**两回事**，别混：
+
+| 目录 | 归谁 | 作用 |
+|---|---|---|
+| `.dsh/skills/` | DSH 智能体框架 | 我会自动加载的技能（如 `ark-seedance`） |
+| `skills/` | 本流水线自己 | 阶段导演技能文档，由流水线的执行层读 |
+
+### 校验
+
+```powershell
+python tools\validate_manifest.py
+```
+
+零依赖（这台机器没装 PyYAML）。它查的不是 YAML 语法，而是**我们的契约**：
+门禁阶段有没有写 `review_focus`、`skill` 有没有登记、工件有没有重复产出、
+依赖的工件前面有没有人产出。当前结果：**结构 0 问题、契约 0 问题**。
+
+### ⚠️ 现状：清单是声明，执行层还没写
+
+**读清单、按它卡门禁的执行层（checkpoint 读写 + 跳门禁报错）尚未实现。**
+在那之前这份清单是给人看的契约，不是机器强制的约束——而"靠自觉"的治理，
+在赶进度的时候一定会失守。各阶段脚本已有幂等跳过与成本记账，
+但没有统一的存档与门禁强制。
 
 ## 数据库结构
 

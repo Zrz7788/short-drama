@@ -1,0 +1,295 @@
+# 竖屏仿真人短剧 · 流水线清单
+#
+# 形态照 OpenMontage 的 pipeline_defs 契约写：声明式地定义阶段、工件、
+# 工具、门禁与判据。**这是我们唯一一条流水线**——只做 9:16 竖屏仿真人短剧。
+#
+# 与它不同的地方（这些是我们已经验证过的，不能丢）：
+#   1. 成本核心是 Draft 样片抽卡：480P 反复试，选中才出 1080P
+#      ¥0.26/秒 vs ¥1.45/秒，差 5.6 倍；在首帧图上抽卡比在视频上抽便宜 20-30 倍
+#   2. 统一实体（人物/场景/道具）+ 三级分级，决定出图量
+#   3. 提示词定稿是确定性拼接而非 LLM 润色——实体描述必须逐字内联
+#
+# ⚠️ 现状说明：本清单目前是**声明**。真正读它、按它卡门禁的执行层
+#    （checkpoint 读写 + GATE VIOLATION 校验）还没写。在执行层落地前，
+#    这份清单是给人看的契约，不是机器强制的约束。
+
+name: short-drama
+version: "1.0"
+description: >
+  竖屏仿真人短剧流水线（9:16，单集约 80 秒，整部 60-100 集）。
+  走火山方舟 Ark：Seedream 出定妆照/三视图/首帧图，Seedance 出视频。
+  成本策略的核心是把「挑选」留在便宜的那一段——480P 样片多抽，1080P 只出一次。
+category: short-drama
+stability: beta
+default_checkpoint_policy: guided
+
+orchestration:
+  mode: executive-producer
+  skill: pipelines/short-drama/executive-producer
+  budget_default_cny: 200.00          # 单集预算（元）。整部剧按集数乘
+  hard_cap_cny: 400.00                # 超过即中止，需要显式放行
+  max_revisions_per_stage: 3
+  max_send_backs: 3
+  max_wall_time_minutes: 180
+
+# 我们的模型与单价锚点（出处与置信度见 knowledge/02-模型与成本/）
+models:
+  image_default: doubao-seedream-4-0-250828
+  image_hifi: doubao-seedream-5-0-pro-260628
+  video_flagship: doubao-seedance-2-5-260628        # ¥1.45/秒
+  video_standard: doubao-seedance-2-0-260128        # ¥1.00/秒
+  draft_resolution: 480p                            # 样片档
+  final_resolution: 1080p
+
+extensions:
+  custom_skills: true
+  custom_tools: true
+  custom_playbooks: true
+
+required_skills:
+  - pipelines/short-drama/executive-producer
+  - pipelines/short-drama/spec-director
+  - pipelines/short-drama/script-director
+  - pipelines/short-drama/cast-director
+  - pipelines/short-drama/art-director
+  - pipelines/short-drama/storyboard-director
+  - pipelines/short-drama/prompt-director
+  - pipelines/short-drama/keyframe-director
+  - pipelines/short-drama/motion-director
+  - pipelines/short-drama/continuity-director
+  - pipelines/short-drama/assemble-director
+  - meta/checkpoint-protocol
+  - meta/reviewer
+  - meta/cost-governor          # 预算三档：observe / warn / cap
+  - meta/consistency-guard      # 跨镜头实体一致性
+
+stages:
+
+  # ---------------------------------------------------------------- 0 规格
+  - name: spec
+    skill: pipelines/short-drama/spec-director
+    produces:
+      - delivery_spec
+      - decision_log
+    tools_available: []
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 交付分辨率是否已定——它决定后面能用哪些模型档位（1080P 只能 2.5 或 2.0 pro）
+      - 单集时长与集数是否都已定——只问「80 秒多少钱」缺一个变量
+      - 音频路线是否已定（Seedance 原生音频 vs 外部 TTS + reference_audio）——它决定台词怎么写
+    success_criteria:
+      - project 表有 aspect_ratio 与 target_episode_seconds
+      - decision_log 至少记录分辨率、集数、音频路线三项，各带理由
+
+  # ---------------------------------------------------------------- 1 剧本
+  - name: script
+    skill: pipelines/short-drama/script-director
+    required_artifacts_in: [delivery_spec]
+    produces:
+      - script
+      - scene_list
+    tools_available:
+      - stage_script
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 前 3 秒是钩子，不是铺垫
+      - 集尾扣子给的是新信息，不是「事情没说完」
+      - 台词每句不超过 12 字
+      - 能演的就别用嘴说
+    success_criteria:
+      - script 表存在 is_current=1 的一版
+      - 每个 scene.beat ∈ {钩子, 建立, 升级, 高潮, 扣子}
+      - scene.seq 从 1 连续编号
+      - 各场 duration_s 合计与目标时长偏差 ≤ 20%
+
+  # ---------------------------------------------------------------- 2 实体
+  - name: cast
+    skill: pipelines/short-drama/cast-director
+    required_artifacts_in: [script]
+    produces:
+      - entity_roster
+    tools_available:
+      - stage_entities
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 分级是否克制——background 级多一个，出图成本就多一份且毫无收益
+      - description 是不是可整段粘进 prompt 的文本块，而不是「成熟知性的女性」这种散文
+      - 三类是否都提了，道具常是剧情核心（一封信、一把钥匙）
+    success_criteria:
+      - entity.kind 覆盖 character 与 location（prop 可空但需说明）
+      - 每个 entity 的 role ∈ {main, secondary, background}
+      - 出图张数与金额已按 price_book 算出并展示给人工
+
+  # ---------------------------------------------------------------- 3/4 参考图
+  - name: art
+    skill: pipelines/short-drama/art-director
+    required_artifacts_in: [entity_roster]
+    produces:
+      - reference_sheets
+    tools_available:
+      - stage_refs
+    checkpoint_required: true
+    human_approval_default: true
+    sub_stages:
+      - name: portrait
+        description: "定妆照。给 main + secondary 出，视角 portrait"
+        tools_available: [stage_refs]
+        human_approval_default: true
+        review_focus:
+          - 定妆照是后续全部镜头的一致性锚点，五官/发型/服装必须清晰可辨
+          - 这张图会被 60-100 集反复引用，图省这点钱最亏
+      - name: turnaround
+        description: "三视图。只给 main 出 front/side/back"
+        condition: "portrait_approved"
+        tools_available: [stage_refs]
+        human_approval_default: true
+        review_focus:
+          - 三视图必须以定妆照为参考图生成（图生图），否则不是同一个人
+          - 三个角度之间的五官/服装不许漂
+    review_focus:
+      - 审完必须**冻结**（entity_ref.approved=1 且 is_primary=1），此后禁止重出
+      - 没有冻结就往下走，第 30 集崩脸是必然的
+    success_criteria:
+      - main 级实体有 portrait + front + side + back
+      - secondary 级实体有 portrait
+      - background 级实体无图
+      - 全部 entity_ref.approved = 1
+
+  # ---------------------------------------------------------------- 5 分镜
+  - name: storyboard
+    skill: pipelines/short-drama/storyboard-director
+    required_artifacts_in: [script, entity_roster]
+    produces:
+      - shot_list
+    tools_available:
+      - stage_storyboard
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 抽卡策略是否分化——正脸特写 draft 4-6 次、空镜 direct 1-2 次。
+        全片一刀切是浪费和灾难的混合
+      - description（给人看）与 action（给模型看）是否分开写了
+      - 每个镜头是否都挂了实体（纯空镜也要挂布景，否则没有视觉锚点）
+    success_criteria:
+      - shot.seq 从 1 连续编号
+      - 每个 shot 至少关联一个 entity
+      - 所有引用的 entity 名逐字存在于 entity 表
+      - strategy ∈ {draft, direct}，且两种都出现（除非本集全是空镜，需说明）
+      - shot.duration_s ∈ [4, 15]
+
+  # ---------------------------------------------------------------- 6 提示词
+  - name: prompts
+    skill: pipelines/short-drama/prompt-director
+    required_artifacts_in: [shot_list, entity_roster]
+    produces:
+      - shot_prompts
+    tools_available:
+      - stage_prompts
+    checkpoint_required: false
+    human_approval_default: false
+    review_focus:
+      - 本阶段**不走 LLM，是确定性拼接**——实体描述必须逐字复制
+      - 一旦让模型「润色」，同一个人在不同镜头就会被描述成不同的人
+    success_criteria:
+      - 每个 shot 的 prompt 非空
+      - **每个 shot 关联实体的 description 都逐字出现在该 shot 的 prompt 中**
+      - 含多个 subject 的镜头，negative_prompt 里有「人物融合」
+
+  # ---------------------------------------------------------------- 7 首帧图
+  - name: keyframes
+    skill: pipelines/short-drama/keyframe-director
+    required_artifacts_in: [shot_prompts, reference_sheets]
+    produces:
+      - keyframes
+    tools_available:
+      - stage_firstframes
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - **这是成片前最后一个便宜的关卡。** 首帧 ¥0.2/张，视频 ¥4-5.8/条，差 20-30 倍
+      - 首帧不对就别去烧视频——视频阶段没有便宜的退路
+      - 画面里的角色必须就是定妆照那个（参考图已作为图生图输入）
+    success_criteria:
+      - 每个 shot 的 keyframe_path 非空且文件存在
+      - 每张首帧的参考图张数 ≥ 1（无参考图的纯文生视频需显式记录并说明）
+    governance:
+      - "禁止为了「挣得」这次人工审查而先跑视频。审查面是首帧图本身，
+        不是渲染出来的片段。在 keyframes 阶段内跑视频 = 跳门禁。"
+
+  # ---------------------------------------------------------------- 8 视频
+  - name: motion
+    skill: pipelines/short-drama/motion-director
+    required_artifacts_in: [keyframes, shot_prompts]
+    produces:
+      - takes
+    tools_available:
+      - stage_video
+    checkpoint_required: true
+    human_approval_default: false      # 抽卡是自动的，但每段样片要人挑
+    sub_stages:
+      - name: draft
+        description: "480P 样片，给 strategy=draft 的镜头，抽 draws_planned 次"
+        condition: "keyframes_approved"
+        tools_available: [stage_video]
+        human_approval_default: true
+        review_focus:
+          - 样片阶段可以放心多抽——这是最便宜的试错通道
+          - 挑中的那一条要记下来（后续成片要用它的参数）
+      - name: direct
+        description: "1080P 直出，给 strategy=direct 的镜头（空镜/背影/转场）"
+        tools_available: [stage_video]
+        human_approval_default: false
+      - name: final
+        description: "对选中的样片出 1080P 成片，复用样片参数"
+        condition: "draft_picked"
+        tools_available: [stage_video]
+        human_approval_default: false
+    review_focus:
+      - 预算是否在跑之前就已确认（--max-cost），price_book 缺价目时拒绝在未知花费下继续
+      - 每个 lens 是否都有 selected_generation_id（没有拼片时不知道用哪个文件）
+    success_criteria:
+      - 每个 shot 至少有一条 status=succeeded 的 generation
+      - 每个 shot 的 selected_generation_id 非空
+      - cost_ledger 的 video 合计 == generation.cost 合计
+      - 样片条数 == strategy=draft 镜头的 draws_planned 之和
+
+  # ---------------------------------------------------------------- 9 衔接
+  - name: continuity
+    skill: pipelines/short-drama/continuity-director
+    required_artifacts_in: [takes]
+    produces:
+      - continuity_map
+    tools_available:
+      - frames
+    checkpoint_required: false
+    human_approval_default: false
+    review_focus:
+      - 默认把相邻镜头串起来（后一镜首帧 = 前一镜尾帧）
+      - 真实短剧有硬切，需要断开时把该镜 continues_from 置空
+    success_criteria:
+      - 每个 shot 的 last_frame_path 非空且文件存在
+      - 相邻镜头满足：后一镜 first_frame_path == 前一镜 last_frame_path
+
+  # ---------------------------------------------------------------- 10 成集
+  - name: assemble
+    skill: pipelines/short-drama/assemble-director
+    required_artifacts_in: [continuity_map]
+    optional_artifacts_in: [subtitle_file]
+    produces:
+      - episode_master
+    tools_available:
+      - assemble
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 成片时长是否等于各镜素材之和
+      - 字幕烧录是否正确（中文字体是常见坑，已在 verify_ffmpeg 里验证过）
+      - 缺失镜头是否已确认（默认拒绝出残缺版）
+    success_criteria:
+      - out/E{seq}.mp4 存在且 ffprobe 可读
+      - 成片时长与各镜素材之和偏差 ≤ 0.5 秒
+      - asset 表有 kind=final 的记录
+      - episode.status = 'assembled'

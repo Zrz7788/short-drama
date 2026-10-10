@@ -201,8 +201,12 @@ def check_pipeline():
        os.path.relpath(FFMPEG, ROOT) if has_ff else "缺失，跑 python tools/setup_ffmpeg.py")
     missing = [s for s in PIPELINE_SCRIPTS if not os.path.exists(os.path.join(ROOT, s))]
     ok("管线", "阶段脚本齐备", not missing, "" if not missing else str(missing))
+    man = os.path.join(ROOT, "pipeline_defs", "short-drama.yaml")
+    ok("管线", "流水线清单存在", os.path.exists(man),
+       os.path.relpath(man, ROOT) if os.path.exists(man) else "缺失")
     if not has_ff or missing:
         return
+    run_child("tools/validate_manifest.py", "流水线清单校验（结构 + 契约）")
     run_child("tools/verify_ffmpeg.py", "ffmpeg 功能验证（编码器/滤镜/中文字幕）")
     run_child("pipeline/selftest.py", "管线端到端自检（抽帧/衔接/拼接/字幕）")
     run_child("pipeline/selftest_llm.py", "第 1/2/5/6 阶段自检（LLM/抽取/落库/组装/反向验证）")
