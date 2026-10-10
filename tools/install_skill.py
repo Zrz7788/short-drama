@@ -24,6 +24,7 @@
 它只把描述打出来让人决定。把相关性做成自动判断只会制造假信心。
 """
 import argparse
+import base64
 import json
 import os
 import re
@@ -139,7 +140,11 @@ def gate(name, skill_md, files, total_bytes, deprecated=()):
         soft.append("体积 %.1f MB 偏大，可能有大量媒体资源" % (total_bytes / 1048576.0))
     if not re.search(r"https?://", skill_md):
         soft.append("没有出处 URL（可信度无法追溯）")
-    if not re.search(r"^#{1,3}\s*(Common Pitfalls|常见陷阱|Pitfalls)", skill_md, re.M):
+    # 陷阱小节。措辞各家用得不一样——实测踩过：只用 "Common Pitfalls|陷阱"
+    # 会把写着「10 项关键踩坑速查」的中文技能误判成没有陷阱小节。
+    if not re.search(r"^#{1,3}\s*[^\n]*?"
+                     r"(Common Pitfalls|Pitfalls|常见陷阱|陷阱|踩坑|避坑|常见问题|注意事项)",
+                     skill_md, re.M | re.I):
         soft.append("没有「陷阱」小节")
     if not re.search(r"^\|.*\|", skill_md, re.M):
         soft.append("没有表格（结构化信息少）")
@@ -253,6 +258,92 @@ def do_install(packs, names, dry_run):
     return len(rejected)
 
 
+def gh_api(url):
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "dsh-study", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        return json.loads(r.read().decode())
+
+
+def gh_blob(repo, sha, ref="main"):
+    d = gh_api("https://api.github.com/repos/%s/git/blobs/%s" % (repo, sha))
+    return base64.b64decode(d["content"])
+
+
+def do_github(repo, path, name, ref, license_id, extras, dry_run):
+    """从 GitHub 仓库的某个目录装一个技能包。
+
+    走 api.github.com（本机的 raw.githubusercontent.com 不通），
+    tree 接口一次列全，再逐个 blob 取。目录结构原样保留。
+    """
+    tree = gh_api("https://api.github.com/repos/%s/git/trees/%s?recursive=1"
+                  % (repo, ref))
+    if tree.get("truncated"):
+        print("警告：仓库过大，tree 被截断，可能漏文件")
+    prefix = path.rstrip("/") + "/"
+    blobs = [e for e in tree.get("tree", [])
+             if e["type"] == "blob" and e["path"].startswith(prefix)]
+    if not blobs:
+        print("仓库 %s 下没有 %s 这个目录" % (repo, path))
+        return 1
+
+    files = {}
+    for e in blobs:
+        rel = e["path"][len(prefix):]
+        files[rel] = gh_blob(repo, e["sha"], ref)
+    # 额外的单文件（如案例复盘），原样附到包内
+    for ex in extras or []:
+        target = next((e for e in tree.get("tree", [])
+                       if e["type"] == "blob" and e["path"] == ex), None)
+        if not target:
+            print("警告：额外文件不存在 %s" % ex)
+            continue
+        files["extras/" + os.path.basename(ex)] = gh_blob(repo, target["sha"], ref)
+
+    skill_md = None
+    for rel, data in files.items():
+        if rel.lower() == "skill.md":
+            skill_md = data.decode("utf-8", "replace")
+    total = sum(len(v) for v in files.values())
+    ok, hard, soft = gate(name, skill_md, len(files), total)
+    print("来源: github.com/%s  %s  (%s)" % (repo, path, license_id or "许可未注明"))
+    print("文件 %d 个，共 %.1f KB" % (len(files), total / 1024.0))
+    print("门禁: %s" % ("通过" if ok else "拒绝"))
+    for h in hard:
+        print("  [硬性] %s" % h)
+    for s in soft:
+        print("  [提示] %s" % s)
+    if not ok:
+        return 1
+    if dry_run:
+        print("dry-run，未落盘")
+        return 0
+
+    dest = os.path.join(DEST_ROOT, name)
+    for rel, data in files.items():
+        out = os.path.join(dest, rel.replace("/", os.sep))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "wb") as f:
+            f.write(data)
+    prov = {}
+    if os.path.exists(PROVENANCE):
+        prov = json.load(open(PROVENANCE, encoding="utf-8"))
+    prov[name] = {
+        "source": "github.com/" + repo,
+        "path": path,
+        "ref": ref,
+        "license": license_id or "unknown",
+        "files": len(files),
+        "bytes": total,
+        "description": (parse_frontmatter(skill_md or "") or {}).get("description", "")[:400],
+        "warnings": soft,
+    }
+    with open(PROVENANCE, "w", encoding="utf-8") as f:
+        json.dump(prov, f, ensure_ascii=False, indent=2)
+    print("已安装到", os.path.relpath(dest, ROOT))
+    return 0
+
+
 def main():
     global ARGS
     ap = argparse.ArgumentParser()
@@ -260,9 +351,21 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--install", nargs="*", default=[])
     ap.add_argument("--from-url")
+    ap.add_argument("--from-github", help="owner/repo")
+    ap.add_argument("--path", help="仓库内目录，如 skills/xxx")
+    ap.add_argument("--ref", default="main")
+    ap.add_argument("--license", dest="license_id")
+    ap.add_argument("--extra", nargs="*", default=[],
+                    help="额外附带的单文件（仓库内路径）")
     ap.add_argument("--name")
     ap.add_argument("--dry-run", action="store_true")
     ARGS = ap.parse_args()
+
+    if ARGS.from_github:
+        if not (ARGS.path and ARGS.name):
+            ap.error("--from-github 需要同时给 --path 和 --name")
+        return do_github(ARGS.from_github, ARGS.path, ARGS.name, ARGS.ref,
+                         ARGS.license_id, ARGS.extra, ARGS.dry_run)
 
     if ARGS.from_url:
         req = urllib.request.Request(ARGS.from_url, headers={"User-Agent": "dsh"})

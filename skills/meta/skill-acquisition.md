@@ -135,7 +135,7 @@ python tools\install_skill.py --from-url <url> --name <名字> --dry-run
 
 ## 六、我们当前的技术技能库
 
-已安装 12 个（来源：OpenMontage，AGPL-3.0，均为文档性质）：
+已安装 14 个。前 12 个来自 OpenMontage（AGPL-3.0），后 2 个来自 ai-mandrama-skills（MIT）：
 
 | 技能 | 用途 |
 |---|---|
