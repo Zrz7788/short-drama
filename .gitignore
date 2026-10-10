@@ -15,6 +15,7 @@ out/
 output/
 renders/
 assets/generated/
+assets/frames/
 *.mp4
 *.mov
 *.webm

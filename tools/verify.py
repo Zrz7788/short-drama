@@ -43,11 +43,16 @@ MUST_NOT_TRACK = [
 DOMAINS = {
     "剧本": ["script", "scene"],
     "集": ["episode"],
-    "镜头": ["shot"],
+    "镜头": ["shot", "shot_entity"],
     "素材": ["asset"],
-    "生成任务": ["generation"],
+    "生成任务": ["generation", "image_generation"],
     "成本": ["cost_ledger", "price_book"],
+    "实体": ["entity", "entity_ref"],
 }
+
+FFMPEG = os.path.join(ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")
+PIPELINE_SCRIPTS = ["pipeline/common.py", "pipeline/frames.py",
+                    "pipeline/assemble.py", "pipeline/selftest.py"]
 
 results = []
 
@@ -158,7 +163,7 @@ def check_db():
 
     idx = [r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")]
-    ok("数据库", "索引数量", len(idx) >= 12, "%d 个" % len(idx))
+    ok("数据库", "索引数量", len(idx) >= 19, "%d 个" % len(idx))
 
     bad = list(con.execute("PRAGMA foreign_key_check"))
     ok("数据库", "外键完整性", not bad, "" if not bad else str(bad[:2]))
@@ -169,6 +174,31 @@ def check_db():
     n = con.execute("SELECT COUNT(*) FROM price_book").fetchone()[0]
     ok("数据库", "价目表非空", n > 0, "%d 条" % n)
     con.close()
+
+
+def run_child(script, title, timeout=900):
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    p = subprocess.run([sys.executable, "-X", "utf8", os.path.join(ROOT, script)],
+                       cwd=ROOT, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=env, timeout=timeout)
+    lines = [l for l in (p.stdout or "").strip().splitlines() if l.strip()]
+    summary = next((l for l in reversed(lines) if "共" in l and "项" in l), "")
+    detail = summary or (lines[-1] if lines else "")
+    ok("管线", title, p.returncode == 0, detail[:76])
+    return p
+
+
+def check_pipeline():
+    print("\n=== 5. ffmpeg 与管线工具链 ===")
+    has_ff = os.path.exists(FFMPEG)
+    ok("管线", "ffmpeg 已安装", has_ff,
+       os.path.relpath(FFMPEG, ROOT) if has_ff else "缺失，跑 python tools/setup_ffmpeg.py")
+    missing = [s for s in PIPELINE_SCRIPTS if not os.path.exists(os.path.join(ROOT, s))]
+    ok("管线", "阶段脚本齐备", not missing, "" if not missing else str(missing))
+    if not has_ff or missing:
+        return
+    run_child("tools/verify_ffmpeg.py", "ffmpeg 功能验证（编码器/滤镜/中文字幕）")
+    run_child("pipeline/selftest.py", "管线端到端自检（抽帧/衔接/拼接/字幕）")
 
 
 def check_selftest():
@@ -189,6 +219,7 @@ def main():
     check_knowledge()
     check_db()
     check_selftest()
+    check_pipeline()
 
     failed = [r for r in results if not r[2]]
     print("\n" + "=" * 64)

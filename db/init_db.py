@@ -49,6 +49,9 @@ COLUMN_MIGRATIONS = [
      "ALTER TABLE shot ADD COLUMN last_frame_path TEXT"),
     ("shot", "continues_from",
      "ALTER TABLE shot ADD COLUMN continues_from INTEGER"),
+    # 抽卡多次后必须能指明"哪条是选中的"，否则拼片时不知道用哪个文件
+    ("shot", "selected_generation_id",
+     "ALTER TABLE shot ADD COLUMN selected_generation_id INTEGER REFERENCES generation(id)"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表
@@ -81,16 +84,19 @@ def migrate(con):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild", action="store_true", help="删库重建")
+    ap.add_argument("--db", default=DB_PATH,
+                    help="数据库路径（默认 data/drama.db；自检用它指向临时库）")
     args = ap.parse_args()
 
-    os.makedirs(DB_DIR, exist_ok=True)
+    db_path = os.path.abspath(args.db)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-    if args.rebuild and os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-        print("已删除旧库:", DB_PATH)
+    if args.rebuild and os.path.exists(db_path):
+        os.remove(db_path)
+        print("已删除旧库:", db_path)
 
-    fresh = not os.path.exists(DB_PATH)
-    con = sqlite3.connect(DB_PATH)
+    fresh = not os.path.exists(db_path)
+    con = sqlite3.connect(db_path)
     con.execute("PRAGMA foreign_keys = ON")
 
     # 第 1 段：建表
@@ -121,7 +127,7 @@ def main():
         con.commit()
         print("已写入 %d 条价目" % len(PRICES))
 
-    print("\n库文件 :", DB_PATH, "(%.1f KB)" % (os.path.getsize(DB_PATH) / 1024.0))
+    print("\n库文件 :", db_path, "(%.1f KB)" % (os.path.getsize(db_path) / 1024.0))
     print("新建   :", "是" if fresh else "否（已存在，做增量迁移）")
 
     tables = [r[0] for r in con.execute(

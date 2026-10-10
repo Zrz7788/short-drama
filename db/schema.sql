@@ -183,6 +183,8 @@ CREATE TABLE IF NOT EXISTS shot (
     last_frame_path  TEXT,                          -- 本镜的尾帧图（供下一镜续接）
     continues_from   INTEGER REFERENCES shot(id) ON DELETE SET NULL,
                     -- 从哪个镜头的尾帧接过来；NULL = 本镜独立起头
+    selected_generation_id INTEGER REFERENCES generation(id) ON DELETE SET NULL,
+                    -- 抽卡多次后选中的那一条；拼片时以它为准
     UNIQUE (episode_id, seq)
 );
 

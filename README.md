@@ -11,19 +11,27 @@ knowledge/          知识库：方法与依据（人读）
   03-项目档案/        每部剧的设定
   04-复盘/            实测数据回流，用来修正 01 和 02
 db/                 数据库
-  schema.sql          表结构唯一真源（11 表），纯加法
+  schema.sql          表结构唯一真源（15 表），纯加法
   views.sql           索引与视图，必须最后执行
   init_db.py          建库 / 增量迁移 / 写入价目
   selftest.py         schema 自检：插模拟数据、验算视图、整体回滚
   export.py           导出纯文本 SQL 便于进 git
+pipeline/           管线阶段脚本
+  common.py           共用层：路径、数据库连接、ffmpeg 调用
+  frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
+  assemble.py         第 10 阶段：拼接成集、可选烧字幕
+  selftest.py         管线端到端自检（合成素材 + 临时库）
 data/                数据库文件与导出（*.db 不进 git）
 .dsh/skills/         智能体技能
   ark-seedance/      Ark 调用参考（模型 ID、单价、Draft、避坑）
 tools/              工具
   setup_git.py       记录 MinGit 的获取方式，保证可复现
-  verify.py          工程底座全量验收（25 项检查）
+  setup_ffmpeg.py    下载便携版 ffmpeg
+  verify.py          全量验收（30 项检查，含管线）
+  verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
+  ffmpeg/            FFmpeg n9.0（免安装版）
   ssh/               GitHub SSH 密钥
 ```
 
@@ -32,7 +40,7 @@ tools/              工具
 ```powershell
 $git = "$PWD\.tools\mingit\cmd\git.exe"
 
-# 全量验收：git + 安全 + 知识库 + 数据库，共 25 项检查
+# 全量验收：git + 安全 + 知识库 + 数据库 + 管线，共 30 项检查
 python tools\verify.py
 
 # 建/校验数据库（含增量迁移）
@@ -40,6 +48,10 @@ python db\init_db.py
 
 # schema 自检：模拟一集数据、验算视图、回滚
 python db\selftest.py
+
+# 管线：抽帧与衔接，再拼接成集
+python pipeline\frames.py --episode-id 1
+python pipeline\assemble.py --episode-id 1
 
 # 导出文本备份
 python db\export.py
@@ -129,9 +141,53 @@ base bundle 里 `mode` 的取值是 `process.env.DSH_PERMISSION_MODE ?? 'workspa
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 ```
 
-### 5. ffmpeg 尚未安装
+### 5. ffmpeg 是便携版，同样不在 PATH 上
 
-拼接、烧字幕、竖屏转码都需要它，目前**缺失**。属于后期环节，不影响出片。
+官方 BtbN 构建（FFmpeg n9.0，GPL 版，含 libx264 与 libass），解压在 `.tools/ffmpeg/`：
+
+```
+.tools/ffmpeg/bin/ffmpeg.exe
+.tools/ffmpeg/bin/ffprobe.exe
+```
+
+已清掉 159 MB 的 `ffplay.exe`（用不到）。重新获取：`python tools\setup_ffmpeg.py`
+
+**验证**：`python tools\verify_ffmpeg.py` —— 不只查版本，而是真合成视频、真抽尾帧、
+真拼接、真烧中文/ASCII 字幕，共 17 项。已全部通过。
+
+## 管线阶段脚本
+
+整条生产流程与脚本的对应关系。**生成环节（3/4/7/8）待 `ARK_API_KEY`**，
+其余阶段现在就能跑。
+
+| 阶段 | 命令 | 产出 | 状态 |
+|---|---|---|---|
+| 0 定交付规格 | 手工填 `project` | 分辨率/时长 | — |
+| 1 生成剧本 | 待写 | `script`、`scene` | LLM，可先手工 |
+| 2 提取实体+分级 | 待写 | `entity` | LLM，可先手工 |
+| 3 定妆照 | 待写 | `image_generation`、`entity_ref` | ⏳ 待密钥 |
+| 4 三视图 | 待写 | `entity_ref(front/side/back)` | ⏳ 待密钥 |
+| 5 生成分镜 | 待写 | `shot`、`shot_entity` | LLM，可先手工 |
+| 6 提示词定稿 | 待写 | `shot.prompt` | LLM，可先手工 |
+| 7 首帧图 | 待写 | `shot.first_frame_path` | ⏳ 待密钥 |
+| 8 视频生成 | 待写 | `generation` | ⏳ 待密钥 |
+| **9 抽帧与衔接** | `python pipeline\frames.py --episode-id N` | `*_first/last.png`、`continues_from` | ✅ |
+| **10 拼接与字幕** | `python pipeline\assemble.py --episode-id N [--srt F]` | `out/E0N.mp4`、`asset` | ✅ |
+
+第 9、10 阶段的要点：
+
+- **抽帧**产出 `assets/frames/E{集}S{镜}_first.png` 与 `_last.png`
+- **衔接**默认把相邻镜头串起来：第 N+1 镜的首帧 = 第 N 镜的尾帧，
+  `continues_from` 指向第 N 镜。真实短剧有硬切，需要断开时把该镜的
+  `continues_from` 置空再重跑
+- **拼接**优先 `-c copy`（不重编码，秒级）；各镜头参数不一致时自动退回
+  重编码并归一化尺寸
+- 拼片用 `shot.selected_generation_id` 决定每个镜头取哪一条抽卡结果；
+  没指定时退回该镜头第一条 `succeeded` 记录
+
+**端到端自检**：`python pipeline\selftest.py` —— 用 ffmpeg 合成假素材 + 临时库，
+真跑一遍两个阶段（含"参数不一致 → 自动重编码"和"中文字幕烧录"），
+并确认没碰生产库与真实 `assets/`。共 28 项。
 
 ## 数据库结构
 
@@ -210,9 +266,13 @@ $git = "$PWD\.tools\mingit\cmd\git.exe"
 | 环节 | 状态 |
 |---|---|
 | Git 本地仓库 | ✅ 已初始化 |
-| SQLite 生产库 | ✅ 8 表 / 3 视图 / 9 索引，价目已入库 |
-| 知识库 | ✅ 6 篇文档 |
+| SQLite 生产库 | ✅ 15 表 / 6 视图 / 19 索引，schema v3，27 项自检通过 |
+| 知识库 | ✅ 10 个 md（7 篇内容 + 3 个索引/模板） |
+| 数据模型 | ✅ 统一实体（人物/场景/道具）+ 参考图 + 镜头续接 |
 | `ark-seedance` skill | ✅ 已建，会话内即时生效 |
+| ffmpeg 工具链 | ✅ 便携版 n9.0，17 项功能验证通过 |
+| 第 9/10 阶段脚本 | ✅ 抽帧、衔接、拼接、字幕，28 项端到端自检通过 |
+| 全量验收 | ✅ `python tools\verify.py`，30 项 |
 | GitHub 远程 | ⏳ 待接入（SSH 密钥已生成、链路实测通；受限模式下 push 需提权） |
-| ffmpeg | ❌ 缺失 |
-| Ark API Key | ⏳ 待提供，之后可跑真实生成 |
+| Ark API Key | ⏳ 待提供，之后可跑第 3/4/7/8 阶段的真实生成 |
+| 第 1/2/5/6 阶段脚本 | ⏳ 待写（可用 LLM 生成，也可先手工填表） |
