@@ -41,6 +41,37 @@ class PromptError(Exception):
     pass
 
 
+def consistency_line(ents, shot):
+    """跨镜一致性的锁定语。
+
+    依据 YouMind 提示词库（703 条）里三种实测写法
+    ——见 knowledge/02-模型与成本/图片提示词库可用手法.md §二·3：
+
+        consistent lighting and color grading **across all panels**   → 光与调色
+        **identical object continuity**                               → 物件
+        the person looks **consistent**, maintain lighting/perspective → 人 + 光 + 视角
+
+    **三条都点名了"哪一层"和"跨什么范围"。**
+    笼统写"保持前后一致"没有约束力——模型不知道要锁哪一层。
+
+    ⚠️ 再说清一件事：**这只是"请求它一致"，不是"保证一致"。**
+    真正的一致性靠参考图 + 内容指纹（`entity_ref.sha256`）+ 事后审核；
+    提示词只能减少漂移，不能消除。
+    """
+    parts = ["光影与调色跨镜一致"]
+    # ⚠️ 用 .get：build() 传进来的 ents 来自另一个查询，
+    # **只有 role/name/description/style_note，没有 kind**。
+    # 直接 e["kind"] 会 KeyError——实测踩过（会让整个第 6 阶段不写库）。
+    kinds = {e.get("kind") for e in (ents or []) if isinstance(e, dict)}
+    if ents:
+        parts.append("人物外观以角色卡为准，本镜不重复描述五官与服装")
+    if "prop" in kinds:
+        parts.append("同一件道具每次用同一个名称与外观")
+    if "location" in kinds:
+        parts.append("场景的空间关系与陈设跨镜不变")
+    return "；".join(parts)
+
+
 def entity_block(ents):
     """按角色排序拼出实体块。description 原样使用，不做任何改写。"""
     parts = []
@@ -83,6 +114,7 @@ def build(shot, ents):
         description=(shot["description"] or "").strip(),
         lighting=(shot["lighting"] or "").strip() or "自然光",
         sfx_line=("环境音：" + shot["sfx"].strip()) if shot["sfx"] else "",
+        consistency_line=consistency_line(ents, shot),
         dialogue_line=("台词（需口型同步）：" + shot["dialogue"].strip())
         if shot["dialogue"] else "")
     # 可选行为空时会留下连续空行，收敛掉

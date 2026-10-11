@@ -13,6 +13,8 @@ $entity_block
 
 【声音】$sfx_line
 
+【一致性】$consistency_line
+
 $dialogue_line
 
 仿真人写实风格，电影感自然光，皮肤质感真实，细节清晰。
