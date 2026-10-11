@@ -99,6 +99,10 @@ def show_status(con, args, m):
         gate = "（有人工门禁，跑完后要你批准）" if s["next_gate"] else "（自动）"
         print("下一步：%s  %s" % (s["next"], gate))
         print("原因：%s" % s["reason"])
+        if s["next_gate"]:
+            # 明确写给 agent 看的一行。**没有这行的时候，agent 会把
+            # "下一步" 当成待办事项直接执行**——而那会绕过人工门禁。
+            print("      ⚠️ 这一阶段需要人工批准，**不要自动执行**它。")
         nxt = m.unit(s["next"])
         if nxt.review_focus:
             print("\n这一阶段要审的：")
@@ -131,7 +135,23 @@ def run_one(con, args, m, key, quiet=False):
     print("\n" + "=" * 72)
     print("阶段 %s%s" % (key, "（有人工门禁）" if u.human_approval else ""))
     print("  产出：%s" % (",".join(u.produces) or "-"))
-    print("  命令：python %s" % " ".join(cmd[3:]))   # cmd = [python, -X, utf8, 脚本, ...]
+    if u.human_approval:
+        # ⚠️ **有门禁的阶段不打印可执行命令。**
+        #
+        # 依据 Agnes Comic Studio 的行为准则：
+        #   「脚本末尾打印的『下一步』是给用户看的操作提示，
+        #     **Agent 不应忽略它直接链式执行**。」
+        #
+        # 我们原来在这里无条件打印 `命令：python …stage_xxx.py …`。
+        # 一个 agent 看到这行，完全可能直接执行它——而**门禁检查在 run.py 里，
+        # 不在 stage 脚本里**，所以直接跑脚本等于绕过整道门。
+        # 实测：本项目的 agent 自己就这么干过好几次。
+        print("  执行：本阶段由人工门禁把关，**不在这里给出可执行命令**")
+        print("        （门禁检查在 run.py，直接跑 stage 脚本会绕过它）")
+        print("        批准上一阶段后再从 run.py 进入，或由操作者手工执行")
+    else:
+        print("  命令：python %s" % " ".join(cmd[3:]))   # cmd = [python, -X, utf8, 脚本, ...]
+        print("        ↑ 供**操作者**手工执行；Agent 不要据此自动链式跑下去")
     print("=" * 72)
     # 门禁先过，**dry-run 也要过**——否则试跑看不出自己会被拦，
     # 而"试跑一下看看"正是最容易跳过门禁的动作。
