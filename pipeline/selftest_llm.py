@@ -26,6 +26,8 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
+from pipeline import stage_entities as E
+from pipeline import stage_storyboard as SB
 from pipeline import llm as L  # noqa: E402
 
 TEST_ROOT = os.path.join(C.ROOT, ".tools", "llm-test")
@@ -118,7 +120,7 @@ def build_storyboard():
             # 运镜四件套：第 5 阶段校验要求这七项非空（缺一项模型就只能自由发挥）
             "camera_emotion": "聚焦式推进" if cam == "推" else "陪伴式平移",
             "movement_speed": "每秒 10-15 厘米，2 秒内完成",
-            "camera_lock": "匀速无卡顿、画面无模糊拖影",
+            "camera_lock": "、".join(sorted(SB.CAMERA_LOCKS)[:2]),   # 从白名单取，不抄
             "camera_angle": "平视",
             "lens_mm": "85mm",
             "composition": "三分法，人物在右三分线",
@@ -295,7 +297,7 @@ def main():
     rep.add("entity 行数", len(rows) == len(ENTITY_OBJ["entities"]),
             "%d（预期 %d）" % (len(rows), len(ENTITY_OBJ["entities"])))
     kinds = {r["kind"] for r in rows}
-    rep.add("三类实体都提取到了", kinds == {"character", "location", "prop"},
+    rep.add("三类实体都提取到了", kinds == E.KINDS,   # 不抄枚举
             " ".join(sorted(kinds)))
     tiers = {}
     for r in rows:

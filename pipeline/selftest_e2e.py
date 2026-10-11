@@ -29,6 +29,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
+from pipeline import stage_entities as E
 from pipeline import selftest_llm as L  # noqa: E402  假 LLM 服务与剧本/实体/分镜数据
 from pipeline import selftest_ark as K  # noqa: E402  假 Ark 服务
 
@@ -147,7 +148,7 @@ def main():
     con = C.connect(TEST_DB)
     kinds = dict(con.execute("SELECT kind, COUNT(*) FROM entity GROUP BY kind").fetchall())
     rep.add("三类实体齐备",
-            set(kinds) == {"character", "location", "prop"},
+            set(kinds) == E.KINDS,   # 从 stage_entities 取，不抄枚举
             " ".join("%s=%d" % kv for kv in sorted(kinds.items())))
     con.close()
 

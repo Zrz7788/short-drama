@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
+from pipeline import ark as A     # noqa: E402  模型 ID 从实现取，不抄字面量
 
 TEST_ROOT = os.path.join(C.ROOT, ".tools", "pipeline-test")
 TEST_DB = os.path.join(TEST_ROOT, "test.db")
@@ -60,7 +61,7 @@ def seed_episode(con, project_id, seq, clip_rels):
         gid = con.execute(
             "INSERT INTO generation (shot_id, attempt_no, model_id, status,"
             " local_path, cost) VALUES (?,1,?, 'succeeded', ?, 4.0)",
-            (sid, "doubao-seedance-2-0-260128", rel)).lastrowid
+            (sid, A.MODEL_VIDEO_20, rel)).lastrowid
         con.execute("UPDATE shot SET selected_generation_id=? WHERE id=?", (gid, sid))
     con.commit()
     return eid

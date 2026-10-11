@@ -13,9 +13,14 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "drama.db")
-# 要 import pipeline.ark 拿默认模型 ID，所以仓库根必须上 sys.path
+
+# 模型 ID **从 ark.py 取**，不抄字面量——这里原来写死 doubao-seedream-4-0-250828，
+# 一个我们因账号未开通而弃用的模型；真实默认是 5-0-pro。
+# 抄值的坏处是改默认模型时测试不会跟着变。
+# ⚠️ 仓库根必须先上 sys.path，再 import pipeline。
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+import pipeline.ark as A   # noqa: E402
 
 # 与 knowledge/02-模型与成本/单集成本模型.md 一致的基准数字。
 #
@@ -137,31 +142,31 @@ def main():
                 con.execute(
                     "INSERT INTO generation (shot_id, attempt_no, model_id, resolution,"
                     " duration_s, is_draft, status, cost) VALUES (?,?,?,?,?,1,'succeeded',?)",
-                    (sh_id, a, "doubao-seedance-2-5-260628", "480p",
+                    (sh_id, a, A.MODEL_VIDEO_25, "480p",
                      SHOT_SECONDS, DRAFT_COST))
                 con.execute(
                     "INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                     " unit_price, amount, episode_id, shot_id) "
                     "VALUES ('video',?,?, 'second',?,?,?,?)",
-                    ("doubao-seedance-2-5-260628", SHOT_SECONDS, DRAFT_PRICE,
+                    (A.MODEL_VIDEO_25, SHOT_SECONDS, DRAFT_PRICE,
                      DRAFT_COST, eid, sh_id))
             con.execute(
                 "INSERT INTO generation (shot_id, attempt_no, model_id, resolution,"
                 " duration_s, is_draft, status, cost) VALUES (?,?,?,?,?,0,'succeeded',?)",
-                (sh_id, DRAWS_EACH + 1, "doubao-seedance-2-5-260628", "1080p",
+                (sh_id, DRAWS_EACH + 1, A.MODEL_VIDEO_25, "1080p",
                  SHOT_SECONDS, FINAL_COST))
             con.execute(
                 "INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                 " unit_price, amount, episode_id, shot_id) "
                 "VALUES ('video',?,?,'second',?,?,?,?)",
-                ("doubao-seedance-2-5-260628", SHOT_SECONDS, FINAL_PRICE,
+                (A.MODEL_VIDEO_25, SHOT_SECONDS, FINAL_PRICE,
                  FINAL_COST, eid, sh_id))
 
         for _ in range(IMAGE_COUNT):
             con.execute(
                 "INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                 " unit_price, amount, episode_id) VALUES ('image',?,1,'image',?,?,?)",
-                ("doubao-seedream-4-0-250828", IMAGE_PRICE, IMAGE_PRICE, eid))
+                (A.MODEL_IMAGE, IMAGE_PRICE, IMAGE_PRICE, eid))
 
         print("--- 视图验算（模拟 %d 镜 × %d 抽 + 1 成片）---" % (SHOTS, DRAWS_EACH))
 
@@ -212,13 +217,13 @@ def main():
                 gid = con.execute(
                     "INSERT INTO image_generation (entity_id, view, model_id, size,"
                     " status, cost) VALUES (?,?,?,?,'succeeded',?)",
-                    (ent_id, v, "doubao-seedream-4-0-250828", "2K", IMAGE_PRICE)
+                    (ent_id, v, A.MODEL_IMAGE, "2K", IMAGE_PRICE)
                 ).lastrowid
                 con.execute(
                     "INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                     " unit_price, amount, episode_id) "
                     "VALUES ('image',?,1,'image',?,?,?)",
-                    ("doubao-seedream-4-0-250828", IMAGE_PRICE, IMAGE_PRICE, eid))
+                    (A.MODEL_IMAGE, IMAGE_PRICE, IMAGE_PRICE, eid))
                 con.execute(
                     "INSERT INTO entity_ref (entity_id, view, path, image_gen_id,"
                     " is_primary, approved) VALUES (?,?,?,?,?,1)",
