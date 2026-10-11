@@ -223,8 +223,30 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
     try:
         nbytes = A.download(url, C.abs_path(rel))
     except Exception as ex:
-        nbytes, rel = 0, None
+        # ⚠️ 下载失败**不是** succeeded。原来这里把 rel 置 None 后继续往下走，
+        #    末尾统一写 'succeeded'——于是磁盘上一张图都没有，库里却是全绿。
+        #    这是"测试全绿但结果不对"的同一类病（HANDOFF §七），而且更贵：
+        #    **它把真实的钱记成了成功**。实测踩到：7 张图 ¥2.10，一张没落盘，
+        #    status 全是 succeeded、local_path 全空。
+        #
+        #    钱是要照记的（模型已经生成、已经计费），但**状态必须诚实**：
+        #    API 成功 + 落盘失败 = 'failed'，并把 url 留下来供重试下载。
+        con.execute(
+            "INSERT INTO image_generation (entity_id, view, model_id, prompt, size,"
+            " ref_image_path, status, image_url, local_path, error, cost, finished_at) "
+            "VALUES (?,?,?,?,?,?,'failed',?,NULL,?,?,datetime('now','localtime'))",
+            (e["id"], view, res["model"], prompt, size, reference, url,
+             "生成成功但下载失败：%s" % str(ex)[:400], cost)).lastrowid
+        con.execute(
+            "INSERT INTO cost_ledger (category, model_id, quantity, unit, unit_price,"
+            " amount, note) VALUES ('image',?,1,'image',?,?,?)",
+            (res["model"], cost, cost, "%s %s（已计费·未落盘）" % (e["name"], view)))
+        con.commit()
         rep.add("%s %s 下载失败" % (tag, e["name"]), False, str(ex)[:60])
+        rep.info("模型已计费 ¥%.2f，但文件没落盘。URL 已存进 image_generation，"
+                 "可用它重试下载（不必重新生成、不必再付费）。" % cost)
+        return False
+
     # ⚠️ 按**内容**校正扩展名。Seedream 返回 JPEG，而 out_path() 拼的是 .png，
     # 于是文件长期是"名叫 png、实为 jpg"。ffmpeg 按内容嗅探所以链路照跑，
     # 但严格的图片读取器会直接拒读——实测踩过。
