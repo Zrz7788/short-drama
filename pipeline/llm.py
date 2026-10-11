@@ -52,9 +52,21 @@ def require_config(base_url=None, api_key=None, model=None):
     return base, key, mdl
 
 
+# ⚠️ 默认超时是**实测出来的**，不是拍的。
+#
+# 原来写 180 秒。真实的实体提取（3957 字符提示词）用
+# doubao-seed-2-1-pro-260915 要跑 **307.5 秒**——180 和 300 都会超时。
+# 原因是这类模型是**推理模型**，内部思考很久（一个极简请求就能吐 885 个
+# 输出 token）。而自检里的假服务是秒回的，所以这个坑一直没暴露。
+#
+# 可用 LLM_TIMEOUT 覆盖（秒）。
+DEFAULT_TIMEOUT = int(os.environ.get("LLM_TIMEOUT") or 600)
+
+
 def chat(messages, base_url=None, api_key=None, model=None,
-         temperature=0.7, max_tokens=8192, retries=3, timeout=180):
+         temperature=0.7, max_tokens=8192, retries=3, timeout=None):
     """调用 /chat/completions，返回助手文本。"""
+    timeout = timeout if timeout is not None else DEFAULT_TIMEOUT
     base, key, mdl = require_config(base_url, api_key, model)
     payload = json.dumps({
         "model": mdl,

@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
 from pipeline import llm as L  # noqa: E402
+from pipeline import ark as A  # noqa: E402  取默认模型 ID，不抄字面量
 
 PROMPT = os.path.join(C.ROOT, "pipeline", "prompts", "entities.md")
 
@@ -164,9 +165,12 @@ def main():
     rep.add("分级分布", True,
             "  ".join("%s=%d" % (t, by_tier[t]) for t in sorted(by_tier)))
 
+    # 取**当前默认图片模型**的单价，不写死模型 ID。
+    # 这里原来写死 'doubao-seedream-4-0-250828'——一个我们因账号未开通而弃用的模型，
+    # 于是成本预估一直用着 ¥0.20 的老价格（真实是 ¥0.30），**低估约 1/3**。
     row = con.execute("SELECT unit_price FROM price_book "
-                      "WHERE model_id = 'doubao-seedream-4-0-250828' AND unit = 'image'"
-                      ).fetchone()
+                      "WHERE model_id = ? AND unit = 'image'",
+                      (A.MODEL_IMAGE,)).fetchone()
     detail = "预计要出 %d 张参考图" % images
     if row:
         detail += "，约 ¥%.1f（按 ¥%.2f/张估）" % (images * row["unit_price"], row["unit_price"])
