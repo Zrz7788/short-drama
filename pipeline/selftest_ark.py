@@ -54,12 +54,16 @@ def make_png():
     return buf.getvalue()
 
 
-def make_mp4(root=None):
+def make_mp4(root=None, short_side=None, seconds=None, aspect=9 / 16.0):
     """用 ffmpeg 造一段真 MP4；没有 ffmpeg 时退化成占位字节。
 
     root 可指定落盘目录（默认本模块的 TEST_ROOT）。别的自检复用本函数时
     必须传自己的目录——否则目标目录不存在，ffmpeg 写不出去就退化成了占位字节，
     而那会让抽帧/拼接阶段的测试失去意义。实测踩过。
+
+    short_side / seconds：**按请求的规格生成**。
+    加入 U0 规格门之后，固定造 270x480/1 秒会被门拦下——那不是门的错，
+    是假服务没有模拟真实的返回规格。传了就按它造，门该过就过。
     """
     root = root or TEST_ROOT
     os.makedirs(root, exist_ok=True)
@@ -67,18 +71,52 @@ def make_mp4(root=None):
     exe = os.path.join(C.ROOT, ".tools", "ffmpeg", "bin", "ffmpeg.exe")
     if not os.path.exists(exe):
         return b"\x00" * 2048, "占位字节（未装 ffmpeg）"
-    r = C.run_ffmpeg(["-f", "lavfi", "-i", "testsrc=size=270x480:rate=24:duration=1",
+    if short_side:
+        # libx264 + yuv420p 要求宽高都是偶数，否则 ffmpeg 直接失败。
+        # 实测踩过：480 / 0.5625 = 853.33 → 853（奇数），编码失败，返回占位字节，
+        # 然后规格门报"读不出视频尺寸"——因果链很绕，值得记一笔。
+        def _even(n):
+            n = int(round(n))
+            return n if n % 2 == 0 else n + 1
+
+        # 竖屏：短边是宽；横屏反过来。这里统一按 aspect<1（竖屏）处理。
+        if aspect and aspect < 1:
+            w, h = _even(short_side), _even(short_side / aspect)
+        else:
+            h, w = _even(short_side), _even(short_side * (aspect or 16 / 9.0))
+        size = "%dx%d" % (w, h)
+    else:
+        size = "270x480"
+    dur = seconds or 1
+    r = C.run_ffmpeg(["-f", "lavfi", "-i",
+                      "testsrc=size=%s:rate=24:duration=%s" % (size, dur),
                       "-c:v", "libx264", "-pix_fmt", "yuv420p",
                       os.path.relpath(out, C.ROOT).replace("\\", "/")], cwd=C.ROOT)
     if r.returncode != 0 or not os.path.exists(out):
         return b"\x00" * 2048, "占位字节（ffmpeg 失败：%s）" % C.tail(r.stderr, 40)
     with open(out, "rb") as f:
-        return f.read(), "真 MP4"
+        return f.read(), "真 MP4（%s %ss）" % (size, dur)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     requests = []
     video_requests = []
+    video_specs = {}      # tid -> (resolution, duration)
+    video_cache = {}      # tid -> mp4 bytes
+    _tid_seq = 0
+
+    @classmethod
+    def next_tid(cls):
+        """只增不减的任务序号。
+
+        ⚠️ **别用 `len(video_requests)`** —— 测试中途会 `clear()`，计数器归零，
+        任务 id 就重复了；而 `video_specs` 是按 id 记规格的，于是 1080p 的请求
+        会拿到早先 480p 任务的缓存视频，被规格门判失败。
+        实测踩过：表现为 `direct`/`final` 全部 spec_failed「短边 480 < 1080」，
+        而规格门本身是对的——错的是假服务。
+        """
+        cls._tid_seq += 1
+        return cls._tid_seq
     video_polls = {}
     state = {"mode": "ok", "n429": 0}
 
@@ -94,7 +132,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/mock/video"):
-            return self._send(200, VIDEO, "video/mp4")
+            # 路径形如 /mock/video.mp4?tid=cgt-0001 —— 按该任务的规格造。
+            tid = ""
+            if "tid=" in self.path:
+                tid = self.path.split("tid=", 1)[1].split("&")[0]
+            res, dur = Handler.video_specs.get(tid, ("1080p", 4))
+            blob = Handler.video_cache.get(tid)
+            if blob is None:
+                short = {"480p": 480, "720p": 720, "1080p": 1080}.get(res, 1080)
+                blob, _note = make_mp4(root=TEST_ROOT, short_side=short,
+                                       seconds=float(dur))
+                Handler.video_cache[tid] = blob
+            return self._send(200, blob, "video/mp4")
         if self.path.startswith("/mock/"):
             return self._send(200, PNG, "image/png")
         if "/contents/generations/tasks/" in self.path:
@@ -106,7 +155,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(200, {"id": tid, "status": "running"})
             return self._json(200, {
                 "id": tid, "status": "succeeded",
-                "content": {"video_url": "http://127.0.0.1:%d/mock/video.mp4" % port},
+                "content": {"video_url":
+                            "http://127.0.0.1:%d/mock/video.mp4?tid=%s" % (port, tid)},
             })
         return self._json(404, {"error": "not found"})
 
@@ -127,8 +177,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if Handler.state["mode"] == "401":
                 return self._json(401, {"error": {"code": "AuthenticationError",
                                                   "message": "the API key is invalid"}})
+            tid = "cgt-%04d" % Handler.next_tid()
+            # 记住这次请求的规格，轮询成功时按它造视频。
+            # 加了 U0 规格门之后，假服务必须**模拟真实的返回规格**——
+            # 否则固定造 270x480 会被门拦下，而那不是门的错。
+            Handler.video_specs[tid] = (body.get("resolution") or "1080p",
+                                        body.get("duration") or 4)
             return self._json(200, {
-                "id": "cgt-%04d" % len(Handler.video_requests),
+                "id": tid,
                 "model": body.get("model", ""),
             })
 

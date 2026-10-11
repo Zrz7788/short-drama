@@ -25,6 +25,7 @@ draft 阶段可以放心多抽，final 阶段每个镜头只出一次。
 """
 import argparse
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -304,9 +305,43 @@ def main():
             ok_all = False
             rep.add(tag + " 下载失败", False, str(ex)[:60])
 
+        # ---- U0 规格门 ----
+        # 在**下载下来的文件**上量硬规格，不信请求参数。
+        # 依据 Muse 流水线评审：画幅已知会跑偏（720×1280、768×1152、784×1088、
+        # 1280×720、640×480 都出现过），而当时没有任何一步能拦住。
+        # **不合格就直接判失败、计入本次尝试——不写 local_path、不进语义检查。**
+        # 先保证它是合法产物，再谈它好不好；顺序不能反。
+        _sa = ep.get("aspect_ratio") or "9:16"
+        try:
+            _aw, _ah = [float(x) for x in re.split(r"[:x×/]", _sa)[:2]]
+            target_aspect = _aw / _ah if _ah else None
+        except Exception:
+            target_aspect = None
+        short_min = {"480p": 480, "720p": 720, "1080p": 1080}.get(resolution)
+        gok, gwhy, gdet = C.spec_gate(
+            C.abs_path(rel), target_aspect=target_aspect,
+            min_short_side=short_min,
+            min_seconds=float(s["duration_s"]) - 1,
+            max_seconds=float(s["duration_s"]) + 1)
+        if not gok:
+            ok_all = False
+            con.execute("UPDATE generation SET status='spec_failed', error=?,"
+                        " video_url=?, local_path=NULL, ratio=?, cost=?,"
+                        " finished_at=datetime('now','localtime') WHERE id=?",
+                        ("规格门不过：%s" % gwhy, url, gdet.get("aspect"), cost, gid))
+            con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
+                        " unit_price, amount, episode_id, shot_id, note) "
+                        "VALUES ('video',?,?, 'second',?,?,?,?,?)",
+                        (cfg["video_model"], float(s["duration_s"]), pps or 0.0,
+                         cost, ep["id"], s["id"],
+                         "S%03d 规格门不过（%s）" % (s["seq"], gwhy[:60])))
+            con.commit()
+            rep.add(tag + " 规格门", False, gwhy[:80])
+            continue
+
         con.execute("UPDATE generation SET status='succeeded', video_url=?, local_path=?,"
-                    " cost=?, finished_at=datetime('now','localtime') WHERE id=?",
-                    (url, rel, cost, gid))
+                    " ratio=?, cost=?, finished_at=datetime('now','localtime') WHERE id=?",
+                    (url, rel, gdet.get("aspect"), cost, gid))
         con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                     " unit_price, amount, episode_id, shot_id, note) "
                     "VALUES ('video',?,?, 'second',?,?,?,?,?)",

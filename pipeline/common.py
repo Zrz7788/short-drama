@@ -114,6 +114,58 @@ def duration(path, cwd=None):
         return -1.0
 
 
+# ---------------------------------------------------------------- U0 规格门
+#
+# 依据 Muse 短片流水线评审（toosielu/muse-idea-to-short Issue #1）：
+# **画幅已知会跑偏**（720×1280、768×1152、784×1088、1280×720、640×480 都出现过），
+# 而当时"没有任何一步能拦住"。
+#
+# 关键设计：在**下载下来的文件**上量，而不是信请求参数——
+# 我们在请求里写 resolution=1080p，不代表它真返回 1080p。
+#
+# 不合格的处理是**原样重生成、计入重试次数、不进入语义检查**：
+# **先保证它是个合法产物，再谈它好不好。顺序不能反。**
+SPEC_ASPECT_TOL = 0.01        # 画幅比例允许的绝对误差
+
+
+def spec_gate(path, target_aspect=None, min_short_side=None,
+              min_seconds=None, max_seconds=None):
+    """量一个**已下载文件**的硬规格。返回 (ok, 说明, 详情)。
+
+    只查机制性的东西（尺寸/时长），**不查内容好不好**——那是语义检查的事。
+    缺参数就不查那一项。
+    """
+    import math
+    d = {}
+    sig = video_signature(path)
+    if not sig or not sig[0] or not sig[1]:
+        return False, "读不出视频尺寸（文件损坏或不是视频）", d
+    w, h = int(sig[0]), int(sig[1])
+    d["width"], d["height"] = w, h
+    d["short_side"] = min(w, h)
+    d["aspect"] = round(w / float(h), 5)
+    d["seconds"] = round(duration(path), 2)
+
+    bad = []
+    if target_aspect:
+        diff = abs(d["aspect"] - float(target_aspect))
+        d["aspect_target"] = float(target_aspect)
+        d["aspect_diff"] = round(diff, 5)
+        if diff > SPEC_ASPECT_TOL:
+            bad.append("画幅 %.4f，目标 %.4f（差 %.4f > %.2f）"
+                       % (d["aspect"], float(target_aspect), diff, SPEC_ASPECT_TOL))
+    if min_short_side and d["short_side"] < int(min_short_side):
+        bad.append("短边 %d < %d" % (d["short_side"], int(min_short_side)))
+    if min_seconds and d["seconds"] >= 0 and d["seconds"] < float(min_seconds) - 0.5:
+        bad.append("时长 %.2fs < %.1fs" % (d["seconds"], float(min_seconds)))
+    if max_seconds and d["seconds"] >= 0 and d["seconds"] > float(max_seconds) + 0.5:
+        bad.append("时长 %.2fs > %.1fs" % (d["seconds"], float(max_seconds)))
+
+    if bad:
+        return False, "；".join(bad), d
+    return True, ("%dx%d %.2fs" % (w, h, d["seconds"])), d
+
+
 def video_signature(path, cwd=None):
     """返回 (宽, 高, 编码, 像素格式) 元组，用于判断能否 -c copy 直接拼接。
 

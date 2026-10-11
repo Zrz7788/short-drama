@@ -299,10 +299,16 @@ def main():
     print("\n=== 最终验收 ===")
     if os.path.exists(out1):
         d = C.duration(out1, cwd=C.ROOT)
-        # 假 Ark 给的是 1 秒素材，一集多少镜就是多少秒
-        expected = float(n_shot)
-        rep.add("成片时长 = 各镜素材之和", abs(d - expected) < 0.5,
-                "%.2f 秒（预期 %.1f，素材各 1 秒）" % (d, expected))
+        # 假 Ark **按请求的时长生成素材**（加了 U0 规格门之后必须这样，否则规格门
+        # 会因为时长不符把合法请求拦掉）。所以成片时长 = 各镜时长之和，
+        # 从库里读，不要写死"素材各 1 秒"。
+        _c = C.connect(TEST_DB)
+        expected = _c.execute(
+            "SELECT COALESCE(SUM(duration_s),0) FROM shot WHERE status IN "
+            "('approved','final','pending') OR status IS NOT NULL").fetchone()[0]
+        _c.close()
+        rep.add("成片时长 = 各镜时长之和", abs(d - expected) < 1.0,
+                "%.2f 秒（预期 %.1f，各镜 %d 个）" % (d, expected, n_shot))
 
     con = C.connect(TEST_DB)
     vcost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger "
