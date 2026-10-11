@@ -41,7 +41,7 @@ VARIANT_FINAL = "旗舰"
 def video_path(ep, shot_seq, attempt):
     p = os.path.join(C.assets_root(), "videos",
                      "E%02dS%03d_a%02d.mp4" % (ep["seq"], shot_seq, attempt))
-    return os.path.relpath(p, C.ROOT).replace("\\", "/")
+    return C.asset_rel(p)
 
 
 def price_of(con, model_id, variant):

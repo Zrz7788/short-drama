@@ -186,7 +186,7 @@ def out_path(ep, e, view):
     """参考图落盘路径。走 assets_root()，便于自检用 DSH_ASSETS_ROOT 隔离。"""
     safe = "".join(ch for ch in e["name"] if ch not in '\\/:*?"<>|').strip() or "entity"
     p = os.path.join(C.assets_root(), "refs", e["kind"], "%s_%s.png" % (safe, view))
-    return os.path.relpath(p, C.ROOT).replace("\\", "/")
+    return C.asset_rel(p)
 
 
 def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):

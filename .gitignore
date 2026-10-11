@@ -15,6 +15,10 @@ out/
 output/
 renders/
 assets/generated/
+assets/refs/
+assets/keyframes/
+assets/videos/
+assets/subs/
 assets/frames/
 *.mp4
 *.mov

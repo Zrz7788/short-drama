@@ -259,8 +259,32 @@ def episode_info(con, episode_id):
 
 def assets_root():
     """素材根目录。可用 DSH_ASSETS_ROOT 覆盖——自检借此写到临时目录，
-    不污染真实的 assets/。"""
+    不污染真实的 assets/。
+
+    也可用来把**生成物放到别的盘**（.env 里设 `DSH_ASSETS_ROOT=D:/...`）。
+    改这个之前请先看 `asset_rel()`：跨盘时路径不能再存相对的。
+    """
     return os.environ.get("DSH_ASSETS_ROOT") or ASSETS
+
+
+def asset_rel(p):
+    """把素材路径存成**跨盘可用的**形式。
+
+    能相对工作区就相对（整个仓库搬家时还找得到）；
+    **不能就存绝对路径。**
+
+    ⚠️ 为什么必须这样：Windows 上跨盘 `os.path.relpath` 会直接抛
+        ValueError: path is on mount 'D:', start on mount 'C:'
+    实测踩过——把生成物放到 D 盘时，落盘路径这一行会整段炸掉。
+    `abs_path()` 对绝对路径是原样返回的，所以两种形式都能读回来。
+    """
+    try:
+        r = os.path.relpath(p, ROOT)
+        if not r.startswith(".."):
+            return r.replace("\\", "/")
+    except ValueError:
+        pass
+    return os.path.abspath(p).replace("\\", "/")
 
 
 def file_sha256(path, chunk=1 << 20):

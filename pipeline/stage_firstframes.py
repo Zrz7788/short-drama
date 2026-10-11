@@ -35,7 +35,7 @@ def keyframe_path(ep, shot_seq, take=1):
     p = os.path.join(C.assets_root(), "keyframes",
                      "E%02dS%03d%s.png" % (ep["seq"], shot_seq,
                                            "" if take == 1 else "_t%d" % take))
-    return os.path.relpath(p, C.ROOT).replace("\\", "/")
+    return C.asset_rel(p)
 
 
 def shot_refs(con, shot_id):
