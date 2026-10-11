@@ -13,6 +13,10 @@ $entity_block
 
 【声音】$sfx_line
 
+$locks_block
+
+$on_screen_text
+
 【一致性】$consistency_line
 
 $dialogue_line

@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -111,6 +111,30 @@ COLUMN_MIGRATIONS = [
     # 一张，系统完全不知道，后面几十集会一直用错的锚点图。
     ("entity_ref", "sha256",
      "ALTER TABLE entity_ref ADD COLUMN sha256 TEXT"),
+    # ---- v8：连续性具名锁 + 画面文字归属 ----
+    # 依据 `knowledge/02-模型与成本/Seedance提示词与连续性锁定.md`：
+    # 「**约束不属于末尾的负面提示词。它们属于「具名块」，且通常用正面措辞
+    #   陈述"什么保持不变"**」——我们原来把约束全塞进 negative_prompt，那是
+    # 最弱的写法，而且否定式对画面本来就无效。
+    #
+    # 这四条是**每镜**都要写的锁，所以给独立列，而不是拼进 description：
+    # 分镜阶段据此逐镜核对，第 6 阶段据此拼成具名正块。
+    #
+    # ⚠️ 加列只能追加在列表**末尾**，且必须与 db/schema.sql 的列顺序一致——
+    #    插到中间会让「新建的库」与「升级上来的库」列顺序不同（踩过 3 次）。
+    ("shot", "screen_direction",
+     "ALTER TABLE shot ADD COLUMN screen_direction TEXT"),   # 轴线：谁永远在画面哪一侧
+    ("shot", "count_lock",
+     "ALTER TABLE shot ADD COLUMN count_lock TEXT"),         # 计数锁：画面里正好几个人/几件物
+    ("shot", "stillness_lock",
+     "ALTER TABLE shot ADD COLUMN stillness_lock TEXT"),     # 静止锁：这一镜"不发生什么"
+    ("shot", "positive_locks",
+     "ALTER TABLE shot ADD COLUMN positive_locks TEXT"),     # 结尾正面重申跨镜保持不变的东西
+    # 画面文字的**归属**：哪一镜、读到的精确内容是什么。
+    # ⚠️ 精确数字（倒计时、门牌、日期）绝不能每镜都显示——跨镜保持文字完全一致
+    #    模型做不到，看起来就是纯漂移。所以必须点名归属到唯一一镜。
+    ("shot", "on_screen_text",
+     "ALTER TABLE shot ADD COLUMN on_screen_text TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

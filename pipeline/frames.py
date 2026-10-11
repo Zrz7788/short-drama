@@ -29,17 +29,67 @@ from pipeline import common as C  # noqa: E402
 
 
 def extract(video_rel, out_rel, last, dry):
-    """抽一帧。last=True 取尾帧，否则取首帧。"""
+    """抽一帧。last=True 取出点帧，否则取首帧。
+
+    **尾帧 ≠ 文件最后一帧。** 原来用 `-sseof -0.1`（倒数 0.1 秒）取到的是片段
+    真正的末尾，而末尾有两种系统性污染：
+
+      - 镜头若收在运动上（技能要求"切点落在运动上，绝不落在静止姿势上"），
+        末帧就是一坨**运动模糊**
+      - 模型尾部衰减或闪黑时，末帧直接是**黑帧**
+
+    所以要退到出点前的**稳定帧**。取证时实测了三件事（5 个测试片段，24fps/2.0s）：
+
+      1. `-ss <出点-0.04>` 放在 `-i` **之前**（输入侧寻址）→ **全部失败**，
+         rc=4294967274，一帧都出不来。这是 ffmpeg 在文件末尾做输入侧寻址的
+         已知边界，**不是偏移量的问题**——把 0.04 改成 0.2 也一样失败。
+      2. `-ss` 放在 `-i` **之后**（输出侧寻址）→ 逐帧解码到目标点，准确但慢。
+      3. `-sseof -N` → 成功，且 N 越大越稳。
+
+    所以这里的策略是**多方案链 + 产出校验**：每个方案都检查帧是否真的产出了，
+    只有产出成功才 commit。**绝不因为 ffmpeg 返回 0 就当成功**——它可能返回 0
+    而不写文件（或写个 0 字节），那会让下游的续接喂进一张空图。
+    """
     if dry:
         return True, "计划"
-    args = (["-sseof", "-0.1"] if last else []) + \
-           ["-i", video_rel, "-vframes", "1", "-q:v", "2", out_rel]
-    r = C.run_ffmpeg(args, cwd=C.ROOT)
-    if r.returncode != 0:
-        return False, C.tail(r.stderr) or "失败"
-    if not os.path.exists(C.abs_path(out_rel)):
-        return False, "未产出文件"
-    return True, "%.1f KB" % (os.path.getsize(C.abs_path(out_rel)) / 1024.0)
+
+    def frame_exists():
+        p = C.abs_path(out_rel)
+        return os.path.exists(p) and os.path.getsize(p) > 0
+
+    if not last:
+        args = ["-i", video_rel, "-vframes", "1", "-q:v", "2", out_rel]
+        r = C.run_ffmpeg(args, cwd=C.ROOT)
+        if r.returncode != 0 or not frame_exists():
+            return False, C.tail(r.stderr) or "未产出文件"
+        return True, "%.1f KB" % (os.path.getsize(C.abs_path(out_rel)) / 1024.0)
+
+    dur = C.duration(C.abs_path(video_rel), cwd=C.ROOT)
+    # 顺序：先"准确的出点帧"，失败再退到稳健的尾部寻址。
+    # 每个方案独立重试（失败时清掉可能的空文件）。
+    attempts = []
+    if dur > 0.2:
+        attempts.append((["-i", video_rel, "-ss", "%.3f" % max(dur - 0.04, 0.0),
+                          "-vframes", "1", "-q:v", "2", out_rel],
+                         "出点帧 %.2fs/%.2fs" % (max(dur - 0.04, 0.0), dur)))
+    attempts.append((["-sseof", "-0.2", "-i", video_rel,
+                      "-vframes", "1", "-q:v", "2", out_rel], "尾部退 0.2s"))
+    attempts.append((["-sseof", "-0.1", "-i", video_rel,
+                      "-vframes", "1", "-q:v", "2", out_rel], "尾部退 0.1s"))
+
+    err = "未产出文件"
+    for args, note in attempts:
+        if frame_exists():                      # 清掉上一次的残留
+            try:
+                os.remove(C.abs_path(out_rel))
+            except OSError:
+                pass
+        r = C.run_ffmpeg(args, cwd=C.ROOT)
+        if r.returncode == 0 and frame_exists():
+            return True, "%.1f KB %s" % (os.path.getsize(C.abs_path(out_rel)) / 1024.0,
+                                         note)
+        err = C.tail(r.stderr) or "未产出文件"
+    return False, err
 
 
 def main():

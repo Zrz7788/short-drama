@@ -130,6 +130,14 @@ def build_storyboard():
             "dialogue": "你到底是谁？" if i == 7 else "",
             "sfx": "夜风声" if scene in (4, 5, 6) else "室内安静",
             "lighting": "冷调夜景，侧逆光" if scene != 1 else "床头台灯暖光",
+            # 连续性具名锁（v8）：轴线/计数/静止/正面重申/画面文字归属。
+            # 依据《Seedance提示词与连续性锁定》——约束属于具名正块，不是尾部负面词。
+            "screen_direction": "林薇永远在画面左侧，陈默永远在右侧；正反打不越轴，两人位置绝不互换",
+            "count_lock": "画面里正好两个人；镜面与玻璃倒影里都不能多出第三个人",
+            "stillness_lock": "没有人站起来、没有人离开画面、化验单始终攥在林薇右手里",
+            "positive_locks": "化验单的褶皱位置不变、走廊日光灯保持同一色温、两人的相对站位不变",
+            # 精确文字只归属到唯一一镜：只有第 4 镜读化验单上的日期
+            "on_screen_text": "化验单日期：11月6日" if i == 4 else "",
             "entities": listing,
             "strategy": strat,
             "draws_planned": draws,

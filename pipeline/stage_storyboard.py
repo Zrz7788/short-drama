@@ -57,11 +57,27 @@ SPEC = {
         "dialogue": L.OPTIONAL_STR,
         "sfx": L.OPTIONAL_STR,
         "lighting": str,
+        # 连续性具名锁（v8）。依据《Seedance提示词与连续性锁定》：
+        # 约束属于**具名块**且用正面措辞，不属于尾部 negative_prompt。
+        #
+        # ⚠️ 这五项是 OPTIONAL：技能把「工艺默认值」定为**可说明理由偏离**的一级
+        #    （craft_default），所以**不能**在这里做成硬拒绝——那会拒收合法输入
+        #    （HANDOFF §七 记过一次："我把 camera_lock 白名单做成硬拒绝，太严"）。
+        #    缺项由 CONTINUITY_LOCKS 的 warn 逐镜报出来，作者据此补或说明。
+        "screen_direction": L.OPTIONAL_STR,
+        "count_lock": L.OPTIONAL_STR,
+        "stillness_lock": L.OPTIONAL_STR,
+        "positive_locks": L.OPTIONAL_STR,
+        "on_screen_text": L.OPTIONAL_STR,   # 只有承载精确文字的那一镜才非空
         "entities": [{"name": str, "role": str}],
         "strategy": str,
         "draws_planned": int,
     }],
 }
+
+# 连续性锁：缺一项，世界状态就只能自由发挥。这四个必须非空。
+CONTINUITY_LOCKS = ("screen_direction", "count_lock", "stillness_lock",
+                    "positive_locks")
 
 
 def load_context(con, ep):
@@ -152,6 +168,12 @@ def check_shots(con, ep, shots, scenes, entities):
         for k in CAMERA_REQUIRED:
             if not str(s.get(k) or "").strip():
                 warn.append("%s %s 为空（缺了模型只能自由发挥）" % (tag, k))
+        # 连续性锁：同样是 warn 级——它是 craft_default，作者能说明理由偏离，
+        # 但"忘了写"和"故意不写"必须能被区分出来，所以逐项报。
+        for k in CONTINUITY_LOCKS:
+            if not str(s.get(k) or "").strip():
+                warn.append("%s %s 为空（世界状态无锁，跨镜会漂：换边/多人/回退）"
+                            % (tag, k))
         spd = str(s.get("movement_speed") or "")
         if spd and not re.search(r"\d", spd):
             warn.append("%s movement_speed 里没有数字：「%s」对模型没有约束力"
@@ -164,6 +186,23 @@ def check_shots(con, ep, shots, scenes, entities):
                 warn.append("%s camera_lock 不在常用短语表里：%s"
                             "（能用就留着，好用的话值得加进 CAMERA_LOCKS）"
                             % (tag, "、".join(unknown)))
+
+    # ---- 画面文字的**归属**检查（跨镜头，不能只在单镜里看）----
+    # 模型无法跨镜头保持同一串文字/数字完全一致，看起来就是纯漂移。
+    # 所以精确内容必须只归属到唯一一镜，其余镜头留空。
+    with_text = [(s["seq"], str(s.get("on_screen_text") or "").strip())
+                 for s in shots if str(s.get("on_screen_text") or "").strip()]
+    if len(with_text) > 2:
+        warn.append("有 %d 个镜头都写了 on_screen_text（第 %s 镜）："
+                    "精确内容应只归属到唯一一镜，其余留空——"
+                    "同一串文字/数字跨镜重复等于要求模型逐字保持一致，做不到"
+                    % (len(with_text), "、".join(str(n) for n, _ in with_text)))
+    for n, txt in with_text:
+        if re.search(r"\d", txt) and len(with_text) > 1:
+            warn.append("第%d镜的 on_screen_text 含数字（「%s」）且不止一镜有画面文字——"
+                        "倒计时/读数**绝不要靠多次显示数字**来表现，"
+                        "改用红字往下跳的动作、光的变化或人物呼吸"
+                        % (n, txt[:24]))
 
     if block:
         raise L.LLMError(
@@ -210,13 +249,18 @@ def persist(con, ep, shots, by_seq, ent_by_name, dry):
             " camera_move, description, action, lighting, dialogue, sfx, strategy,"
             " camera_emotion, movement_speed, camera_lock, camera_angle, lens_mm,"
             " composition, dof,"
-            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
+            " screen_direction, count_lock, stillness_lock, positive_locks,"
+            " on_screen_text,"
+            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
             (ep["id"], by_seq[s["scene_seq"]], s["seq"], float(s["duration_s"]),
              s["shot_size"], s["camera_move"], s["description"], s["action"],
              s["lighting"], s.get("dialogue") or "", s.get("sfx") or "",
              s["strategy"],
              s["camera_emotion"], s["movement_speed"], s["camera_lock"],
              s["camera_angle"], s["lens_mm"], s["composition"], s["dof"],
+             s.get("screen_direction") or "", s.get("count_lock") or "",
+             s.get("stillness_lock") or "", s.get("positive_locks") or "",
+             s.get("on_screen_text") or "",
              int(s["draws_planned"]))).lastrowid
         for e in s["entities"]:
             con.execute("INSERT OR IGNORE INTO shot_entity (shot_id, entity_id, role) "

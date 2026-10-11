@@ -212,6 +212,15 @@ CREATE TABLE IF NOT EXISTS shot (
     -- 提示词模板固定为「命名 + 从X到Y + 速度(秒/帧) + 防崩坏说明 + 风格」。
     camera_emotion   TEXT,                          -- 情绪化命名，如"聚焦式推进""压抑式下降"
     camera_lock      TEXT,                          -- 防崩坏说明，如"匀速无卡顿""无模糊拖影"
+    -- 连续性具名锁（v8）。依据《Seedance提示词与连续性锁定》：
+    -- **约束不属于末尾的负面提示词，属于具名块，且用正面措辞陈述"什么保持不变"。**
+    -- 原来把约束全塞进 negative_prompt——那是最弱的写法，且否定式对画面无效。
+    -- ⚠️ 以下列的顺序**必须与 COLUMN_MIGRATIONS 的追加顺序一致**（同上）。
+    screen_direction TEXT,                          -- 轴线：谁永远在画面哪一侧，绝不互换
+    count_lock       TEXT,                          -- 计数锁："正好四个人，绝不五个"
+    stillness_lock   TEXT,                          -- 静止锁：这一镜"不发生什么"
+    positive_locks   TEXT,                          -- 结尾正面重申跨镜保持不变的东西
+    on_screen_text   TEXT,                          -- 画面文字归属：哪一镜读到什么精确内容
     UNIQUE (episode_id, seq)
 );
 

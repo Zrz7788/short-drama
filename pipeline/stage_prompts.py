@@ -41,6 +41,20 @@ class PromptError(Exception):
     pass
 
 
+def _g(row, key, default=""):
+    """安全取列。sqlite3.Row 缺列会抛 IndexError（不是 KeyError），两种都兜。
+
+    为什么不用 row[key] 直接取：本文件的 build() 同时被主流程和自检调用，
+    自检传进来的 row 来自另一条 SELECT，未必带全部列。取不到就退回默认值，
+    比让整个第 6 阶段崩掉好——缺的锁本来就是可选的（warn 已在第 5 阶段报过）。
+    """
+    try:
+        v = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if v is None else v
+
+
 def consistency_line(ents, shot):
     """跨镜一致性的锁定语。
 
@@ -84,6 +98,30 @@ def entity_block(ents):
     return "\n".join(parts)
 
 
+def locks_block(shot):
+    """连续性具名锁块。**用正面措辞陈述"什么保持不变"。**
+
+    依据《Seedance提示词与连续性锁定》：约束**不属于**末尾的 negative_prompt，
+    而属于具名块。原文一句话点明根因——
+    *"约束属于「具名块」，且通常用正面措辞陈述'什么保持不变'"*。
+
+    而且否定式对画面本就无效（我们自己的结论：写"不要文字"，模型照样给文字）。
+    所以这里全部写成肯定句："沈九永远在画面左侧"，而不是"不要换边"。
+
+    缺项就不占位（warn 已在第 5 阶段逐镜报过），不在这里编造。
+    """
+    def g(k):
+        return str(_g(shot, k)).strip()
+    rows = [("轴线", g("screen_direction")),
+            ("计数", g("count_lock")),
+            ("静止", g("stillness_lock")),
+            ("保持", g("positive_locks"))]
+    rows = [(k, v) for k, v in rows if v]
+    if not rows:
+        return ""
+    return "\n".join("【%s】%s" % (k, v) for k, v in rows)
+
+
 def build(shot, ents):
     # 运镜拼成一行：情绪化命名（命名）+ 基底运镜 + 速度 + 防崩坏说明。
     # 依据《运镜与分镜规范》：同一个"推"，写成"聚焦式推进"就同时是动作描述
@@ -115,6 +153,10 @@ def build(shot, ents):
         lighting=(shot["lighting"] or "").strip() or "自然光",
         sfx_line=("环境音：" + shot["sfx"].strip()) if shot["sfx"] else "",
         consistency_line=consistency_line(ents, shot),
+        locks_block=locks_block(shot),
+        on_screen_text=("画面文字（本镜唯一一次显示，逐字照此）："
+                        + str(_g(shot, "on_screen_text")).strip())
+        if str(_g(shot, "on_screen_text")).strip() else "",
         dialogue_line=("台词（需口型同步）：" + shot["dialogue"].strip())
         if shot["dialogue"] else "")
     # 可选行为空时会留下连续空行，收敛掉
@@ -155,6 +197,8 @@ def main():
         "SELECT id, seq, duration_s, shot_size, camera_move, camera_emotion,"
               " movement_speed, camera_lock, camera_angle, lens_mm, composition, dof,"
               " description, action,"
+              " screen_direction, count_lock, stillness_lock, positive_locks,"
+              " on_screen_text,"
         " lighting, dialogue, sfx, strategy FROM shot WHERE episode_id=? ORDER BY seq",
         (ep["id"],)).fetchall()
     if not shots:
