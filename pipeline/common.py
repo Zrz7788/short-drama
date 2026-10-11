@@ -127,6 +127,35 @@ def duration(path, cwd=None):
 # **先保证它是个合法产物，再谈它好不好。顺序不能反。**
 SPEC_ASPECT_TOL = 0.01        # 画幅比例允许的绝对误差
 
+# 图片魔数 → 扩展名。**按内容判断，不按我们给文件名取的扩展名。**
+_IMG_SIGS = ((b"\x89PNG\r\n\x1a\n", ".png"),
+             (b"\xff\xd8\xff", ".jpg"),
+             (b"RIFF", ".webp"),
+             (b"GIF8", ".gif"),
+             (b"BM", ".bmp"))
+
+
+def sniff_image_ext(path):
+    """按**文件内容**判断图片真实格式，返回小写扩展名；认不出返回 None。
+
+    ⚠️ 为什么必须有这个：Seedream 返回的是 **JPEG**，而我们把文件名写成了 `.png`。
+    实测踩过——三张人物参考图全是 `xxx.png`，字节却是 JPEG。
+
+    这个 bug 藏了很久没暴露，因为 **ffmpeg 这类工具按内容嗅探、不在意扩展名**，
+    整条链路照样跑通；**只有严格的图片读取器（以及任何信扩展名的人或工具）看得出**。
+    我们的自检也从没检查过真实格式——**又一个"能跑通但不对"**。
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    for sig, ext in _IMG_SIGS:
+        if head.startswith(sig):
+            return ext
+    return None
+
+
 
 def spec_gate(path, target_aspect=None, min_short_side=None,
               min_seconds=None, max_seconds=None):

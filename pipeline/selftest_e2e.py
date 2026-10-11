@@ -42,6 +42,23 @@ rep = C.Report("全链路集成测试")
 PROD0 = C.prod_fingerprint()   # 开工前记生产库指纹（供隔离性检查比对）
 
 
+def _assets_snapshot():
+    """真实 assets/ 的文件清单快照（相对路径集合）。
+
+    ⚠️ 别用「真实 assets/ 不存在」当隔离性断言——**真跑过第 3/4 阶段之后它必然存在**，
+    而那正是生产该有的样子。要比的是"自检有没有往里加东西"。
+    """
+    root = os.path.join(C.ROOT, "assets")
+    out = set()
+    for dp, _dn, fns in os.walk(root):
+        for fn in fns:
+            out.add(os.path.relpath(os.path.join(dp, fn), root))
+    return out
+
+
+ASSETS0 = _assets_snapshot()   # 开工前记素材目录清单
+
+
 def run(script, args, llm_base, ark_base):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     env.update(
@@ -339,9 +356,13 @@ def main():
 
     _unch, _why = C.prod_unchanged(PROD0)
     rep.add("生产库全程未被写入", _unch, _why)
-    rep.add("真实 assets/ 未被创建",
-            not os.path.exists(os.path.join(C.ROOT, "assets", "refs"))
-            and not os.path.exists(os.path.join(C.ROOT, "assets", "keyframes")))
+    # ⚠️ 原来断言「真实 assets/ 未被创建」——**真跑过第 3 阶段之后必然失效**：
+    # 生产目录本来就该有参考图与首帧，而那不是"自检污染了生产目录"。
+    # 改成检查**自检用的是隔离的素材根**——这才是它真正想保证的事。
+    _test = os.environ.get("DSH_ASSETS_ROOT", "")
+    _added = sorted(_assets_snapshot() - ASSETS0)
+    rep.add("自检没有往真实 assets/ 里写东西", not _added,
+            "无新增" if not _added else "新增 %d 个：%s" % (len(_added), _added[:3]))
 
     llm_srv.shutdown()
     ark_srv.shutdown()

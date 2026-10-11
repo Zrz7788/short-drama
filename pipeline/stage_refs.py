@@ -225,6 +225,18 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
     except Exception as ex:
         nbytes, rel = 0, None
         rep.add("%s %s 下载失败" % (tag, e["name"]), False, str(ex)[:60])
+    # ⚠️ 按**内容**校正扩展名。Seedream 返回 JPEG，而 out_path() 拼的是 .png，
+    # 于是文件长期是"名叫 png、实为 jpg"。ffmpeg 按内容嗅探所以链路照跑，
+    # 但严格的图片读取器会直接拒读——实测踩过。
+    if rel:
+        _real = C.sniff_image_ext(C.abs_path(rel))
+        if _real and not rel.lower().endswith(_real):
+            _new = rel[:rel.rfind(".")] + _real
+            try:
+                os.replace(C.abs_path(rel), C.abs_path(_new))
+                rel = _new
+            except OSError:
+                pass
 
     gid = con.execute(
         "INSERT INTO image_generation (entity_id, view, model_id, prompt, size,"

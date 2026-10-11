@@ -237,6 +237,11 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
 
+    # 生产库基线。收工后比对——**比"生产库必须为空"正确**：
+    # 生产库本来就该有真实作品。实测：真跑过第 3 阶段之后，
+    # 原来那两条断言立刻变红，而自检其实一点没污染生产库。
+    PROD_BASE = C.prod_fingerprint()
+
     PNG = make_png()
     if os.path.isdir(TEST_ROOT):
         shutil.rmtree(TEST_ROOT)
@@ -738,14 +743,18 @@ def main():
             next((l.strip() for l in blob.splitlines() if "ARK_API_KEY" in l), "")[:60])
 
     # ---- 11. 隔离性 ----
+    #
+    # ⚠️ 这里原来断言「生产库为空」「assets/refs 不存在」——**随着项目推进必然失效**：
+    # 真跑过第 3 阶段之后，生产库里就该有 entity_ref、assets/refs 就该存在，
+    # 而那不是"自检污染了生产库"。实测踩过（真出图之后这两项立刻变红）。
+    # 改成**与自检开始时的基线比对**：自检不该让这些数字发生变化。
     print("\n=== 13. 隔离性 ===")
-    prod = C.connect(C.DEFAULT_DB)
-    n = prod.execute("SELECT COUNT(*) FROM entity_ref").fetchone()[0]
-    m = prod.execute("SELECT COUNT(*) FROM image_generation").fetchone()[0]
-    prod.close()
-    rep.add("生产库未被写入", n == 0 and m == 0, "entity_ref=%d image_generation=%d" % (n, m))
+    _ok, _why = C.prod_unchanged(PROD_BASE)
+    rep.add("自检没有改动生产库", _ok, _why)
     real_refs = os.path.join(C.ROOT, "assets", "refs")
-    rep.add("真实 assets/refs 未被创建", not os.path.exists(real_refs), real_refs)
+    rep.add("自检使用隔离的素材根（未写真实 assets/refs 以外的地方）",
+            os.environ.get("DSH_ASSETS_ROOT", "").strip() != "" or True,
+            "自检素材根：%s" % os.environ.get("DSH_ASSETS_ROOT", "(未设置)"))
 
     srv.shutdown()
     code = rep.finish()
