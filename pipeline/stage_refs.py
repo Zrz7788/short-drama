@@ -127,6 +127,41 @@ def entity_block(e):
     return "【%s·%s】%s" % (e["kind"], e["name"], body)
 
 
+def verify_refs(con):
+    """检查已冻结的参照图**内容有没有变**。
+
+    依据 dsh-film 的交接规范：**绝不因为文件名看着对就认一个文件；
+    字节变了就是另一个版本。**
+
+    返回 (ok, 说明)。三种异常要分开报：
+      missing  文件不在了
+      changed  sha256 对不上——**文件被换过**（同名覆盖、手动替换）
+      unknown  历史数据没记 sha256（迁移前的行）
+    """
+    missing, changed, unknown, ok = [], [], [], 0
+    for r in con.execute("SELECT entity_id, view, path, sha256 FROM entity_ref"):
+        p = C.abs_path(r["path"]) if r["path"] else None
+        if not p or not os.path.exists(p):
+            missing.append("%s/%s" % (r["entity_id"], r["view"]))
+            continue
+        if not r["sha256"]:
+            unknown.append("%s/%s" % (r["entity_id"], r["view"]))
+            continue
+        if C.file_sha256(p) != r["sha256"]:
+            changed.append("%s/%s" % (r["entity_id"], r["view"]))
+        else:
+            ok += 1
+    if not (missing or changed):
+        return True, "OK（%d 张一致%s）" % (
+            ok, "，%d 张缺指纹（迁移前）" % len(unknown) if unknown else "")
+    parts = []
+    if changed:
+        parts.append("**%d 张内容已变**：%s" % (len(changed), "、".join(changed[:5])))
+    if missing:
+        parts.append("%d 张文件缺失：%s" % (len(missing), "、".join(missing[:5])))
+    return False, "；".join(parts)
+
+
 def build_view_prompt(e, view_name, view_desc):
     """按素材类型组装提示词。
 
@@ -197,12 +232,15 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
         "VALUES (?,?,?,?,?,?,'succeeded',?,?,?,datetime('now','localtime'))",
         (e["id"], view, res["model"], prompt, size, reference, url, rel, cost)
     ).lastrowid
+    # 内容指纹。**字节变了就是另一个版本**——只靠路径认图，
+    # 文件被同名覆盖或手动换了一张，系统是不知道的。
+    sha = C.file_sha256(C.abs_path(rel)) if rel else None
     con.execute(
-        "INSERT INTO entity_ref (entity_id, view, path, image_gen_id, is_primary, approved)"
-        " VALUES (?,?,?,?,?,0) "
+        "INSERT INTO entity_ref (entity_id, view, path, image_gen_id, is_primary,"
+        " approved, sha256) VALUES (?,?,?,?,?,0,?) "
         "ON CONFLICT(entity_id, view) DO UPDATE SET path=excluded.path, "
-        "image_gen_id=excluded.image_gen_id",
-        (e["id"], view, rel, gid, 1 if view == PRIMARY_VIEW.get(e["kind"]) else 0))
+        "image_gen_id=excluded.image_gen_id, sha256=excluded.sha256",
+        (e["id"], view, rel, gid, 1 if view == PRIMARY_VIEW.get(e["kind"]) else 0, sha))
     con.execute(
         "INSERT INTO cost_ledger (category, model_id, quantity, unit, unit_price,"
         " amount, note) VALUES ('image',?,1,'image',?,?,?)",
@@ -223,7 +261,10 @@ def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
 def main():
     ap = argparse.ArgumentParser(description="第 3/4 阶段：生成参考图")
     ap.add_argument("--episode-id", type=int, required=True)
-    ap.add_argument("--phase", choices=("characters", "scenes", "props"), required=True)
+    ap.add_argument("--phase", choices=("characters", "scenes", "props"), required=False,
+                    default=None)
+    ap.add_argument("--verify-refs", action="store_true",
+                    help="只检查已冻结的参照图内容有没有被换过，不出图（不需要 --phase）")
     ap.add_argument("--only", default=None, help="只处理某个实体名")
     ap.add_argument("--include-background", action="store_true",
                     help="连 background 级实体也出图（默认不出）")
@@ -239,6 +280,23 @@ def main():
     ep = C.episode_info(con, args.episode_id)
     if not ep:
         print("找不到集:", args.episode_id)
+        return 2
+
+    # --verify-refs：只查不生成。用在下游出图之前——
+    # 已冻结的锚点图若被换过，后面几十集都会用错。
+    if args.verify_refs:
+        rep = C.Report("参照图内容指纹校验")
+        okr, why = verify_refs(con)
+        rep.add("参照图内容指纹一致", okr, why)
+        if not okr:
+            print("\n参照图被换过了。下游生成会用到错的锚点图——")
+            print("  要么把文件换回去，要么用 --force 重出这些视角。")
+        con.close()
+        return rep.finish()
+
+    if not args.phase:
+        print("要么给 --phase {characters|scenes|props}，要么给 --verify-refs")
+        con.close()
         return 2
 
     label = {"characters": "第 3 阶段 · 人物素材（大头照 + 全身照）",

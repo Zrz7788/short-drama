@@ -111,6 +111,9 @@ CREATE TABLE IF NOT EXISTS entity_ref (
     approved     INTEGER NOT NULL DEFAULT 0 CHECK (approved IN (0,1)),
     notes        TEXT,
     created_at   TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    -- ⚠️ 位置必须与 COLUMN_MIGRATIONS 的追加顺序一致——迁移是往末尾加的。
+    -- 插到中间会让"新建的库"与"升级上来的库"列顺序不同。
+    sha256       TEXT,                          -- 内容指纹（v7）：**字节变了就是另一个版本**
     UNIQUE (entity_id, view)
 );
 

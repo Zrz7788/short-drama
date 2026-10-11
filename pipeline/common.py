@@ -182,6 +182,22 @@ def assets_root():
     return os.environ.get("DSH_ASSETS_ROOT") or ASSETS
 
 
+def file_sha256(path, chunk=1 << 20):
+    """算文件的内容指纹。文件不存在返回 None。
+
+    用途：参照图的版本标识。依据 dsh-film 的交接规范——
+    **绝不因为文件名看着对就认一个文件；字节变了就是另一个版本。**
+    """
+    import hashlib
+    if not path or not os.path.exists(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(chunk), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
 # 自检用来证明"没污染生产库"的几张表
 PROD_TABLES = ("project", "episode", "script", "scene", "entity", "shot",
                "generation", "image_generation", "entity_ref", "asset")

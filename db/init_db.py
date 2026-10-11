@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -104,6 +104,13 @@ COLUMN_MIGRATIONS = [
      "ALTER TABLE shot ADD COLUMN camera_emotion TEXT"),
     ("shot", "camera_lock",
      "ALTER TABLE shot ADD COLUMN camera_lock TEXT"),
+    # ---- v7：参照图内容指纹 ----
+    # 依据 dsh-film 的交接规范：「**绝不因为文件名看着对就绑定或接受一个文件；
+    # 字节变了就是另一个版本**」。
+    # 我们原来 entity_ref.path 只是一个路径——文件被替换、同名覆盖、或手动换了
+    # 一张，系统完全不知道，后面几十集会一直用错的锚点图。
+    ("entity_ref", "sha256",
+     "ALTER TABLE entity_ref ADD COLUMN sha256 TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表
