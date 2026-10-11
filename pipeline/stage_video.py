@@ -192,7 +192,10 @@ def main():
                              1 if args.mode == "draft" else 0, None))
 
     if not plan:
-        rep.add("有待生成的条目", False, "没有需要处理的镜头")
+        # ⚠️ 「没事可做」**不是失败**。原来这里记成 False，于是"这一档已经全出完了"
+        # 会被当成错误退出——而它其实是正常状态（幂等重跑时就该这样）。
+        # 按规则强度三分法，这既不是 block 也不是 warn，只是陈述。
+        rep.add("有待生成的条目", True, "没有需要处理的镜头（这一档已出完）")
         con.close()
         return rep.finish()
 
@@ -213,11 +216,11 @@ def main():
 
     if args.max_cost is not None:
         if estimate is None:
-            rep.add("预算检查", False, "无法估价（price_book 缺价目），拒绝在未知花费下继续")
+            rep.add("[%s] 预算检查" % C.BLOCK, False, "无法估价（price_book 缺价目），拒绝在未知花费下继续")
             con.close()
             return rep.finish()
         if estimate > args.max_cost:
-            rep.add("预算检查", False, "预估 ¥%.0f 超过 --max-cost ¥%.0f，已中止"
+            rep.add("[%s] 预算检查" % C.BLOCK, False, "预估 ¥%.0f 超过 --max-cost ¥%.0f，已中止"
                     % (estimate, args.max_cost))
             con.close()
             return rep.finish()

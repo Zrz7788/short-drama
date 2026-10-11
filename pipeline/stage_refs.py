@@ -384,7 +384,7 @@ def main():
         # 原来这里只打一句"成本将记 0"就接着跑。后果是：跑 80 集、生成几千张图，
         # cost_ledger 上写着 ¥0，你完全不知道花了多少。
         # 这与 cost-governor 里给视频定的规矩应当一致——当时只对图片手软了。
-        rep.add("价目缺失时拒绝继续", False,
+        rep.add("[%s] 价目缺失时拒绝继续" % C.BLOCK, False,
                 "price_book 里没有 %s 的图片单价" % cfg["image_model"])
         print()
         print("拒绝在未知花费下继续——按 0 记账会让账本彻底失真。")

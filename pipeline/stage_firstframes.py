@@ -167,7 +167,7 @@ def main():
         # 与 stage_refs 同一规矩：**拒绝在未知花费下继续**。
         # 按 0 记账会让账本失真——而首帧图是全片抽卡最密集的一步，
         # 这里失真最要命。
-        rep.add("价目缺失时拒绝继续", False,
+        rep.add("[%s] 价目缺失时拒绝继续" % C.BLOCK, False,
                 "price_book 里没有 %s 的图片单价" % cfg["image_model"])
         print()
         print("拒绝在未知花费下继续。补价目：")
