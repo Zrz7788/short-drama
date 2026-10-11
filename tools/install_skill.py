@@ -148,6 +148,18 @@ def gate(name, skill_md, files, total_bytes, deprecated=()):
         soft.append("没有「陷阱」小节")
     if not re.search(r"^\|.*\|", skill_md, re.M):
         soft.append("没有表格（结构化信息少）")
+    # ⭐ 路由可用性：有没有 triggers。
+    #
+    # 依据 xusu-ai/jiucaihezi-app 的复盘（提交 3216921）：路由**只该信 triggers，
+    # 不该扫 description**——描述是写给人看的散文，拿它做子串匹配会捞出泛词。
+    # 那个 bug 的形状：「生成一张人物照片」被挂上打戏技能，因为打戏的描述里
+    # 有「剧情、人物、场景」。
+    #
+    # 没写 triggers 的技能，规则层看不见它，只能落到 LLM 判断——
+    # **那比猜错便宜**，所以这里只是提示，不拒绝。
+    if not re.search(r"^triggers\s*:", skill_md, re.M):
+        soft.append("没有 triggers —— 路由的规则层看不见它，只能靠 LLM 判（比猜错便宜，"
+                    "但最好补上具体的搜索词）")
     return not hard, hard, soft
 
 

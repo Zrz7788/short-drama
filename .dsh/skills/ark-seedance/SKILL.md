@@ -2,6 +2,22 @@
 name: ark-seedance
 description: "火山方舟（Ark）Seedance 视频生成与 Seedream 图片生成的调用参考：模型 ID、单价、Draft 样片模式、任务轮询流程与计费要点。编写视频/图片生成脚本、选择模型档位或估算 AI 短剧成本时使用。"
 whenToUse: "需要调用火山方舟生成视频或图片、批量出片、选择 Seedance/Seedream 档位、估算抽卡成本，或排查 Ark 接口报错时。"
+# ⭐ triggers 是**作者手写的搜索关键词**（路由只用它，不扫 description）。
+# 依据 xusu-ai/jiucaihezi-app 的复盘：拿散文描述做子串匹配会捞出泛词，
+# 结果「生成一张人物照片」把打戏技能挂上来了。
+# 所以这里只写**具体**的词，**不写「视频」「图片」「模型」「生成」这类泛词**
+# ——它们不指向任何一个技能，写进来只会造成误选。
+triggers:
+  - 火山方舟
+  - Ark
+  - Seedance
+  - Seedream
+  - draft 模式
+  - 480P 样片
+  - 抽卡成本
+  - ARK_API_KEY
+  - InvalidEndpointOrModel
+  - 视频任务轮询
 ---
 
 # 火山方舟 Seedance / Seedream 调用参考
