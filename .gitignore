@@ -32,6 +32,7 @@ data/*.db
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm
+data/*.db.bak-*
 
 # ---- DSH 运行时产物 ----
 *.tmp

@@ -83,6 +83,9 @@ stages:
       - decision_log 至少记录分辨率、集数、音频路线三项，各带理由
 
   # ---------------------------------------------------------------- 1 剧本
+  # 真源是 `剧集/EP###/剧本.md`（agent 按 short-drama-write 技能写），
+  # 由 stage_script --from-md 导入库。原来的「一次 LLM 调出 JSON」已降为兼容通道：
+  # 它把「场」定义成 4–15 秒，正是剧本被切成碎片的根因（HANDOFF §四）。
   - name: script
     skill: pipelines/short-drama/script-director
     required_artifacts_in: [delivery_spec]
@@ -91,18 +94,23 @@ stages:
       - scene_list
     tools_available:
       - stage_script
+      - md_import
     checkpoint_required: true
     human_approval_default: true
     review_focus:
       - 前 3 秒是钩子，不是铺垫
       - 集尾扣子给的是新信息，不是「事情没说完」
-      - 台词每句不超过 12 字
+      - 一场是完整戏剧单元，30–60 秒；一集 80 秒 = 1–2 场（不是 4 秒碎片）
       - 能演的就别用嘴说
+      - 画面文字用肯定式写，且每场不超过 2 处
+      - beat 与 duration_s 是导入时**推断**的（技能无这两个字段），
+        见剧本同目录 .beat-inferred，须人工核对
     success_criteria:
       - script 表存在 is_current=1 的一版
       - 每个 scene.beat ∈ {钩子, 建立, 升级, 高潮, 扣子}
       - scene.seq 从 1 连续编号
       - 各场 duration_s 合计与目标时长偏差 ≤ 20%
+      - 技能索引器（screenplay_index.py）复核 review_status=clean
 
   # ---------------------------------------------------------------- 2 实体
   - name: cast

@@ -3,8 +3,23 @@
 
 产出写入 script（含版本管理）与 scene 两张表。
 
-三种用法：
-  # 调 LLM
+**两条通道**：
+
+  ① 调 LLM 吐 JSON（旧通道，本文件内的 build_prompt/persist）。
+     依赖手写的 pipeline/prompts/script.md，它第 6 行把「场」定义成 4–15 秒的
+     「镜头」，是剧本被切成碎片的根因（见 HANDOFF §四）。保留只为兼容自检。
+
+  ② `--from-md`：**agent 按 short-drama-write 技能写 Markdown，本阶段只导入**。
+     剧本真源是 `剧集/EP###/剧本.md`，解析、校验、写库在 pipeline/md_import.py。
+     创作类阶段要判断和迭代，不能靠一次 LLM 调用；生成类阶段才保持纯脚本。
+
+用法：
+  # ② agent + skill（推荐）
+  python pipeline/stage_script.py --episode-id 1 --from-md 剧集/EP001/剧本.md
+  python pipeline/stage_script.py --episode-id 1 --from-md 剧集/EP001/剧本.md --dry-run
+  python pipeline/stage_script.py --episode-id 1 --from-md 剧集/EP001/剧本.md --beat 钩子,扣子
+
+  # ① 调 LLM（旧）
   python pipeline/stage_script.py --episode-id 1 --brief "一个关于…的故事"
 
   # agent 驱动：跳过调用，直接读入外部产出的 JSON
@@ -22,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
 from pipeline import llm as L  # noqa: E402
+from pipeline import md_import as MDI  # noqa: E402
 
 PROMPT = os.path.join(C.ROOT, "pipeline", "prompts", "script.md")
 
@@ -104,11 +120,30 @@ def main():
     ap.add_argument("--episode-id", type=int, required=True)
     ap.add_argument("--brief", default=None,
                     help="创意梗概。不传则取 project.logline（真源）")
+    ap.add_argument("--from-md", dest="from_md", default=None,
+                    help="② agent + skill 通道：导入技能格式的剧本 Markdown")
+    ap.add_argument("--beat", default=None,
+                    help="覆盖导入时推断的 beat，逗号分隔按场序，如 钩子,扣子")
     L.add_llm_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
 
     con = C.connect(args.db)
+
+    # ② agent + skill 通道：剧本真源是 Markdown 文件，本阶段只导入。
+    #    放在取 brief 之前——导入不需要 brief，logline 反而该由剧本反填。
+    if args.from_md:
+        ep = C.episode_info(con, args.episode_id)
+        if not ep:
+            print("找不到集:", args.episode_id)
+            con.close()
+            return 2
+        beats = [b.strip() for b in args.beat.split(",")] if args.beat else None
+        try:
+            return MDI.run(con, ep, args.from_md, args.dry_run, beats)
+        finally:
+            con.close()
+
     ep = C.episode_info(con, args.episode_id)
     if not ep:
         print("找不到集:", args.episode_id)
