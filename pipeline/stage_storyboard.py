@@ -101,7 +101,21 @@ def build_prompt(ep, script, scenes, entities, target):
 
 
 def check_shots(con, ep, shots, scenes, entities):
-    """返回 (scene_id_map, entity_id_map, 统计)。任何不一致都抛 LLMError。"""
+    """返回 (scene_id_map, entity_id_map, 统计, 警告列表)。
+
+    ⭐ **规则强度三分法**（依据 dsh-film 的交接规范）：
+
+      block  可核查的——引用完整性、枚举、API 硬限制、预算护栏。
+             **修正或报告；这些会阻断交接。**
+      warn   工艺默认值——craft 层面的建议（运镜四件套是否写全、
+             速度是否带数字…）。**遵循，除非作者意图另有说明；
+             偏离时说清理由即可，不阻断。**
+      note   品味——结局基调、钩子类型、视角、风格。
+             **作者决定；绝不用它阻断。**（本阶段暂无此类检查）
+
+    原来这里**所有**检查都 raise——把"工艺建议"当成了"机制性错误"。
+    结果是作者想用别的防崩坏词、或某镜暂时不写运镜情绪命名时，整批被拒收。
+    """
     by_seq = {s["seq"]: s["id"] for s in scenes}
     ent_by_name = {e["name"]: e["id"] for e in entities}
 
@@ -109,52 +123,63 @@ def check_shots(con, ep, shots, scenes, entities):
     if seqs != list(range(1, len(shots) + 1)):
         raise L.LLMError("shot.seq 必须从 1 连续编号，实际：%s" % seqs[:12])
 
-    bad = []
+    block, warn = [], []
     for s in shots:
         tag = "第%d镜" % s["seq"]
+        # ---- block：机制性的，过不去 ----
         if s["shot_size"] not in SHOT_SIZES:
-            bad.append("%s shot_size=%s" % (tag, s["shot_size"]))
+            block.append("%s shot_size=%s" % (tag, s["shot_size"]))
         if s["camera_move"] not in CAMERA_MOVES:
-            bad.append("%s camera_move=%s" % (tag, s["camera_move"]))
-        # 运镜四件套：七个字段必须非空，否则模型只能自由发挥
+            block.append("%s camera_move=%s" % (tag, s["camera_move"]))
+        if s["strategy"] not in STRATEGIES:
+            block.append("%s strategy=%s" % (tag, s["strategy"]))
+        if not (4 <= float(s["duration_s"]) <= 15):
+            block.append("%s duration_s=%s 超出 4–15 秒（API 硬限制）"
+                         % (tag, s["duration_s"]))
+        if not (1 <= int(s["draws_planned"]) <= 20):
+            block.append("%s draws_planned=%s 超出 1–20" % (tag, s["draws_planned"]))
+        if s["scene_seq"] not in by_seq:
+            block.append("%s scene_seq=%s 不存在" % (tag, s["scene_seq"]))
+        if not s["entities"]:
+            block.append("%s 没有任何实体（出图无从约束）" % tag)
+        for e in s["entities"]:
+            if e["role"] not in ROLES:
+                block.append("%s 实体 role=%s 非法" % (tag, e["role"]))
+            if e["name"] not in ent_by_name:
+                block.append("%s 引用了不存在的实体「%s」" % (tag, e["name"]))
+
+        # ---- warn：工艺默认值，说清理由就能偏离 ----
         for k in CAMERA_REQUIRED:
             if not str(s.get(k) or "").strip():
-                bad.append("%s %s 为空" % (tag, k))
-        # 速度必须带数字——"缓慢""快速"这类形容词对模型没有约束力
+                warn.append("%s %s 为空（缺了模型只能自由发挥）" % (tag, k))
         spd = str(s.get("movement_speed") or "")
         if spd and not re.search(r"\d", spd):
-            bad.append("%s movement_speed 里没有数字：%s" % (tag, spd[:30]))
-        # 防崩坏说明必须在白名单里（允许顿号连接多项）
+            warn.append("%s movement_speed 里没有数字：「%s」对模型没有约束力"
+                        % (tag, spd[:24]))
         lock = str(s.get("camera_lock") or "")
         if lock:
             parts = [x.strip() for x in re.split(r"[、,，]", lock) if x.strip()]
             unknown = [x for x in parts if x not in CAMERA_LOCKS]
             if unknown:
-                bad.append("%s camera_lock 含未知项：%s" % (tag, "、".join(unknown)))
-        if s["strategy"] not in STRATEGIES:
-            bad.append("%s strategy=%s" % (tag, s["strategy"]))
-        if not (4 <= float(s["duration_s"]) <= 15):
-            bad.append("%s duration_s=%s 超出 4–15 秒" % (tag, s["duration_s"]))
-        if not (1 <= int(s["draws_planned"]) <= 20):
-            bad.append("%s draws_planned=%s 超出 1–20" % (tag, s["draws_planned"]))
-        if s["scene_seq"] not in by_seq:
-            bad.append("%s scene_seq=%s 不存在" % (tag, s["scene_seq"]))
-        if not s["entities"]:
-            bad.append("%s 没有任何实体" % tag)
-        for e in s["entities"]:
-            if e["role"] not in ROLES:
-                bad.append("%s 实体 role=%s 非法" % (tag, e["role"]))
-            if e["name"] not in ent_by_name:
-                bad.append("%s 引用了不存在的实体「%s」" % (tag, e["name"]))
-    if bad:
-        raise L.LLMError("分镜校验未通过（%d 项）：\n  - %s"
-                         % (len(bad), "\n  - ".join(bad[:10])))
+                warn.append("%s camera_lock 不在常用短语表里：%s"
+                            "（能用就留着，好用的话值得加进 CAMERA_LOCKS）"
+                            % (tag, "、".join(unknown)))
+
+    if block:
+        raise L.LLMError(
+            "分镜校验未通过（%d 项机制性问题）：\n  - %s\n\n"
+            "（另有 %d 项工艺建议，见下方 warn）"
+            % (len(block), "\n  - ".join(block[:10]), len(warn)))
+    for w in warn:
+        print("  --   [warn] %s" % w)
 
     total = sum(float(s["duration_s"]) for s in shots)
     draft = [s for s in shots if s["strategy"] == "draft"]
     draws = sum(int(s["draws_planned"]) for s in shots)
-    return by_seq, ent_by_name, {"total": total, "draft": len(draft),
-                                 "direct": len(shots) - len(draft), "draws": draws}
+    return (by_seq, ent_by_name,
+            {"total": total, "draft": len(draft),
+             "direct": len(shots) - len(draft), "draws": draws},
+            warn)
 
 
 def estimate_cost(con, shots):
@@ -259,12 +284,20 @@ def main():
             obj = L.chat_json([{"role": "user", "content": prompt}], SPEC, "分镜",
                               base_url=args.base_url, model=args.model)
             rep.info("来源：模型调用")
-        by_seq, ent_by_name, stat = check_shots(con, ep, obj["shots"], scenes, entities)
+        by_seq, ent_by_name, stat, warns = check_shots(
+            con, ep, obj["shots"], scenes, entities)
     except L.LLMError as e:
         rep.add("产出可用", False, str(e)[:90])
         print("\n" + str(e))
         con.close()
         return rep.finish()
+
+    # 工艺建议不阻断，但要显式报出来——作者可以据此决定改不改
+    rep.add("机制性校验通过", True, "无阻断项")
+    if warns:
+        rep.add("工艺建议（不阻断）", True, "%d 项，见上方 [warn]" % len(warns))
+    else:
+        rep.add("工艺建议（不阻断）", True, "无")
 
     rep.add("镜头数", True, "%d 个" % len(obj["shots"]))
     rep.add("时长合计接近目标", abs(stat["total"] - target) <= target * 0.2,
