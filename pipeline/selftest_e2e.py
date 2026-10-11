@@ -105,17 +105,26 @@ def main():
                        encoding="utf-8", errors="replace")
     rep.add("临时库建立", p.returncode == 0)
     con = C.connect(TEST_DB)
-    # 给**当前代码默认用的模型**补价目。种子里写的旧图片模型现在已不是默认值，
-    # 不补的话 stage_refs / stage_firstframes 会因"价目缺失"直接拒绝继续
+    # 价目**从生产库复制**，不硬编码。
+    # 原来写死 0.20 / 1.45——0.20 是我们已弃用的 seedream-4-0 的价格，
+    # 当前默认模型的真实价格是 0.30。硬编码意味着价格一变测试就测老世界。
+    # 不补价目的话 stage_refs / stage_firstframes 会因"价目缺失"直接拒绝继续
     # （那是刻意的安全行为），整个链路就断在这。
     from pipeline import ark as _A
-    for mid, unit, price in ((_A.MODEL_IMAGE, "image", 0.20),
-                             (_A.MODEL_VIDEO_25, "second", 1.45)):
-        if not con.execute("SELECT 1 FROM price_book WHERE model_id=? AND unit=?",
-                           (mid, unit)).fetchone():
+    _prod = C.connect(C.DEFAULT_DB)
+    for mid, unit in ((_A.MODEL_IMAGE, "image"), (_A.MODEL_VIDEO_25, "second")):
+        if con.execute("SELECT 1 FROM price_book WHERE model_id=? AND unit=?",
+                       (mid, unit)).fetchone():
+            continue
+        r = _prod.execute(
+            "SELECT variant, unit_price, confidence FROM price_book "
+            "WHERE model_id=? AND unit=? ORDER BY unit_price LIMIT 1",
+            (mid, unit)).fetchone()
+        if r:
             con.execute("INSERT INTO price_book (model_id, variant, unit, unit_price,"
-                        " confidence, source) VALUES (?,?,?,?,'high','自检种子')",
-                        (mid, "自检", unit, price))
+                        " confidence, source) VALUES (?,?,?,?,?,'复制自生产库')",
+                        (mid, r["variant"], unit, r["unit_price"], r["confidence"]))
+    _prod.close()
     pid = con.execute("INSERT INTO project (name, logline, target_episode_seconds) "
                       "VALUES ('端到端自检剧','一条化验单引发的对峙',80)").lastrowid
     eid = con.execute("INSERT INTO episode (project_id, seq, target_seconds) "

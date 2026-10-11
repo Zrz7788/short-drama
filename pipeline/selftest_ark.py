@@ -205,21 +205,46 @@ def main():
                        encoding="utf-8", errors="replace")
     rep.add("临时库建立", p.returncode == 0)
     con = C.connect(TEST_DB)
-    # 给**当前代码默认用的模型**补价目。
+    # **从生产价目表复制真实价格**，不硬编码。
     #
-    # 之前这里依赖 init_db 的种子价目，而种子写的是 doubao-seedream-4-0-250828。
-    # 默认模型一改（换成本账号真正开通的 seedream-5-0-pro），种子就对不上，
-    # 成本静默记 0，三条断言全挂。测试不该依赖生产默认值——
-    # 所以这里按 ark.py 的实际默认值补，默认再变也不会挂。
+    # 这里原来写死 0.20 与 1.45。0.20 是 doubao-seedream-4-0-250828 的价格——
+    # 一个我们因为账号没开通而**弃用**的模型；当前默认模型的真实价格是 0.30。
+    # 于是测试在一个虚构的价格世界里跑，而且断言名里还写着"¥0.20/张"误导人。
+    #
+    # 更要命的是：硬编码意味着**价格一变，测试不会跟着变**——
+    # 它测的还是老世界。改成从生产库复制后，两边永远同步。
     from pipeline import ark as _A
-    for mid, unit, price in ((_A.MODEL_IMAGE, "image", 0.20),
-                             (_A.MODEL_VIDEO_25, "second", 1.45)):
-        ex = con.execute("SELECT 1 FROM price_book WHERE model_id=? AND unit=?",
-                         (mid, unit)).fetchone()
-        if not ex:
+    prod = C.connect(C.DEFAULT_DB)
+    for mid, unit in ((_A.MODEL_IMAGE, "image"), (_A.MODEL_VIDEO_25, "second")):
+        src = prod.execute(
+            "SELECT variant, unit_price, confidence, source FROM price_book "
+            "WHERE model_id=? AND unit=? AND variant LIKE '%Draft%' "
+            "ORDER BY unit_price LIMIT 1", (mid, unit)).fetchone()
+        if not src:
+            src = prod.execute(
+                "SELECT variant, unit_price, confidence, source FROM price_book "
+                "WHERE model_id=? AND unit=? ORDER BY unit_price LIMIT 1",
+                (mid, unit)).fetchone()
+        if src:
             con.execute("INSERT INTO price_book (model_id, variant, unit, unit_price,"
-                        " confidence, source) VALUES (?,?,?,?,'high','自检种子')",
-                        (mid, "自检", unit, price))
+                        " confidence, source) VALUES (?,?,?,?,?,?)",
+                        (mid, src["variant"], unit, src["unit_price"],
+                         src["confidence"], "自检·复制自生产库"))
+    prod.close()
+    # 把本测试要用的单价读回来，后面的期望值全部由它推导——不再有魔数
+    PRICE_IMG = con.execute(
+        "SELECT unit_price FROM price_book WHERE model_id=? AND unit='image'",
+        (_A.MODEL_IMAGE,)).fetchone()["unit_price"]
+    PRICE_DRAFT = con.execute(
+        "SELECT unit_price FROM price_book WHERE model_id=? AND unit='second' "
+        "AND variant LIKE '%Draft%'", (_A.MODEL_VIDEO_25,)).fetchone()
+    PRICE_FINAL = con.execute(
+        "SELECT unit_price FROM price_book WHERE model_id=? AND unit='second' "
+        "AND variant NOT LIKE '%Draft%'", (_A.MODEL_VIDEO_25,)).fetchone()
+    PRICE_DRAFT = PRICE_DRAFT["unit_price"] if PRICE_DRAFT else PRICE_IMG
+    PRICE_FINAL = PRICE_FINAL["unit_price"] if PRICE_FINAL else PRICE_IMG
+    rep.info("价目（复制自生产库）：图片 ¥%.2f/张　样片 ¥%.2f/秒　成片 ¥%.2f/秒"
+             % (PRICE_IMG, PRICE_DRAFT, PRICE_FINAL))
     con.commit()
     pid = con.execute("INSERT INTO project (name) VALUES ('Ark 自检')").lastrowid
     eid = con.execute("INSERT INTO episode (project_id, seq, target_seconds) "
@@ -297,9 +322,9 @@ def main():
     rep.add("image_generation 记录", n_gen == want_portrait, "%d 条" % n_gen)
     cost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger WHERE category='image'"
                        ).fetchone()[0]
-    expect = want_portrait * 0.20
-    rep.add("成本已入账（¥0.20/张）", abs(cost - expect) < 1e-6,
-            "¥%.2f（预期 ¥%.2f）" % (cost, expect))
+    expect = want_portrait * PRICE_IMG
+    rep.add("成本已入账（图片单价 × 张数）", abs(cost - expect) < 1e-6,
+            "¥%.2f（预期 ¥%.2f，单价 ¥%.2f）" % (cost, expect, PRICE_IMG))
     missing_file = 0
     for r in con.execute("SELECT path FROM entity_ref"):
         if not os.path.exists(C.abs_path(r["path"])):
@@ -358,7 +383,7 @@ def main():
             % (prim, want_char_prim, want_scene_prim))
     total_cost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger"
                              ).fetchone()[0]
-    rep.add("累计成本", abs(total_cost - (want_portrait + want_turn) * 0.20) < 1e-6,
+    rep.add("累计成本", abs(total_cost - (want_portrait + want_turn) * PRICE_IMG) < 1e-6,
             "¥%.2f" % total_cost)
     con.close()
 
@@ -440,8 +465,8 @@ def main():
     # 期望：人物素材 + 场景素材 + --force 重出的人物素材 + 首帧图
     expect_imgs = want_portrait + want_turn + want_portrait + len(shot_plan)
     rep.add("成功出图总张数符合预期", n_ok == expect_imgs, "%d 张" % n_ok)
-    rep.add("成本 = 成功张数 × 单价", abs(cost7 - n_ok * 0.20) < 1e-6,
-            "¥%.2f（%d 张 × ¥0.20）" % (cost7, n_ok))
+    rep.add("成本 = 成功张数 × 单价", abs(cost7 - n_ok * PRICE_IMG) < 1e-6,
+            "¥%.2f（%d 张 × ¥%.2f）" % (cost7, n_ok, PRICE_IMG))
     con.close()
 
     Handler.requests.clear()
@@ -541,8 +566,9 @@ def main():
     rep.add("样片文件都已下载", miss == 0, "%d 个缺失" % miss)
     vcost = con.execute("SELECT COALESCE(SUM(amount),0) FROM cost_ledger "
                         "WHERE category='video'").fetchone()[0]
-    rep.add("视频成本按秒计费（¥0.26/秒·样片）",
-            abs(vcost - 6 * 4 * 0.26) < 1e-6, "¥%.2f" % vcost)
+    rep.add("视频成本按秒计费（样片单价 × 秒数）",
+            abs(vcost - 6 * 4 * PRICE_DRAFT) < 1e-6,
+            "¥%.2f（6 任务 × 4 秒 × ¥%.2f）" % (vcost, PRICE_DRAFT))
     rep.add("每个任务都轮询过（≥2 次）",
             bool(Handler.video_polls) and all(v >= 2 for v in Handler.video_polls.values()),
             "%d 个任务被轮询" % len(Handler.video_polls))

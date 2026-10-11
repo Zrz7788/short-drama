@@ -13,22 +13,72 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(ROOT, "data", "drama.db")
+# 要 import pipeline.ark 拿默认模型 ID，所以仓库根必须上 sys.path
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-# 与 knowledge/02-模型与成本/单集成本模型.md 一致的基准数字
+# 与 knowledge/02-模型与成本/单集成本模型.md 一致的基准数字。
+#
+# ⚠️ 价格**从生产价目表读**，不硬编码——这里原来写死 IMAGE_PRICE = 0.20，
+# 那是 doubao-seedream-4-0-250828 的价格（一个因账号未开通而弃用的模型），
+# 真实默认模型是 0.30。硬编码意味着**价格一变测试就测老世界**。
+# 视频那两档（0.26 / 1.45）本来就和生产一致，仍然读库以防将来漂移。
 SHOTS = 20
 SHOT_SECONDS = 4
 DRAWS_EACH = 3
-DRAFT_PRICE = 0.26      # 元/秒 · 480p 样片（反推值）
-FINAL_PRICE = 1.45      # 元/秒 · 1080p 成片
 IMAGE_COUNT = 50
-IMAGE_PRICE = 0.20
 
-DRAFT_COST = SHOT_SECONDS * DRAFT_PRICE          # 1.04
-FINAL_COST = SHOT_SECONDS * FINAL_PRICE          # 5.80
-VIDEO_TOTAL = SHOTS * (DRAWS_EACH * DRAFT_COST + FINAL_COST)   # 178.40
-IMAGE_TOTAL = IMAGE_COUNT * IMAGE_PRICE          # 10.00
+
+def _prices(con):
+    """从生产库读**当前实际在用的模型**的三档单价。
+
+    ⚠️ 不能只写 ORDER BY unit_price LIMIT 1——那会取到全库最便宜的，
+    也就是**已弃用的模型**。实测踩过：拿到了 doubao-seedream-4-0-250828 的
+    0.20 与 doubao-seedance-2-0 标准档的 1.00，都不是我们在用的。
+    必须按 ark.py 的默认模型筛。
+    """
+    import pipeline.ark as A
+
+    def one(model_id, unit, like=None, exclude=None):
+        q = ("SELECT unit_price FROM price_book WHERE model_id=? AND unit=?"
+             " AND unit_price IS NOT NULL")
+        args = [model_id, unit]
+        if like:
+            q += " AND variant LIKE ?"; args.append(like)
+        if exclude:
+            q += " AND variant NOT LIKE ?"; args.append(exclude)
+        q += " ORDER BY unit_price LIMIT 1"
+        r = con.execute(q, args).fetchone()
+        return r[0] if r else None
+
+    img = one(A.MODEL_IMAGE, "image")
+    draft = one(A.MODEL_VIDEO_25, "second", like="%Draft%")
+    final = one(A.MODEL_VIDEO_25, "second", exclude="%Draft%")
+    missing = [n for n, v in (("image", img), ("draft", draft), ("final", final)) if v is None]
+    if missing:
+        raise SystemExit(
+            "价目表缺 %s 的单价（模型 %s / %s）—— 先补 price_book 再跑 db 自检"
+            % ("、".join(missing), A.MODEL_IMAGE, A.MODEL_VIDEO_25))
+    return img, draft, final
 
 BEATS = [("钩子", 3.0), ("建立", 14.0), ("升级", 40.0), ("高潮", 17.0), ("扣子", 6.0)]
+
+# 价格与据此算出的总额，在 main() 里连库后填（见 _set_prices）
+DRAFT_PRICE = FINAL_PRICE = IMAGE_PRICE = None
+DRAFT_COST = FINAL_COST = VIDEO_TOTAL = IMAGE_TOTAL = None
+
+
+def _set_prices(con):
+    """连库后读价目并算总额。**所有期望值都由它推导，测试里不再有魔数。**"""
+    global DRAFT_PRICE, FINAL_PRICE, IMAGE_PRICE
+    global DRAFT_COST, FINAL_COST, VIDEO_TOTAL, IMAGE_TOTAL
+    IMAGE_PRICE, DRAFT_PRICE, FINAL_PRICE = _prices(con)
+    DRAFT_COST = SHOT_SECONDS * DRAFT_PRICE
+    FINAL_COST = SHOT_SECONDS * FINAL_PRICE
+    VIDEO_TOTAL = SHOTS * (DRAWS_EACH * DRAFT_COST + FINAL_COST)
+    IMAGE_TOTAL = IMAGE_COUNT * IMAGE_PRICE
+    print("  价目（读自生产库）：图片 ¥%.2f/张　样片 ¥%.2f/秒　成片 ¥%.2f/秒"
+          % (IMAGE_PRICE, DRAFT_PRICE, FINAL_PRICE))
 
 checks = []
 
@@ -47,6 +97,7 @@ def main():
 
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA foreign_keys = ON")
+    _set_prices(con)   # 期望值全部由生产价目表推导，不留魔数
     con.isolation_level = None
     BEFORE = con.execute("SELECT COUNT(*) FROM project").fetchone()[0]  # 开工前基线
     con.execute("BEGIN")
