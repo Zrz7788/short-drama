@@ -18,8 +18,8 @@
 |---|---|
 | 验收 | **39/39** |
 | 工作区 | **干净** |
-| 本地 = 远端 | ⚠️ **本地领先 1 个提交**（`88ce698` 推不上去，见 §九） |
-| 提交数 | **78**（`git rev-list --count HEAD`） |
+| 本地 = 远端 | **一致**（`ca6d4a9`，已 push） |
+| 提交数 | **79**（`git rev-list --count HEAD`） |
 | 受控文件 | **213** |
 | 知识库 | **29 篇 / 244 KB** |
 | schema 版本 | **v7** |
@@ -255,7 +255,7 @@ G:\deepseek\resources\runtime\cli\bin\dsh.cmd plugin --profile desktop add <包�
 
 | # | 事 | 影响 |
 |---|---|---|
-| 1 | **`88ce698` 推不到远端** | 本地领先 1 个提交。git push 报 `couldn't create signal pipe, Win32 error 5`——**沙箱禁止命名管道**，ssh 起不来。需在完整权限下 push，或让用户自己推 |
+| 1 | ~~`88ce698` 推不到远端~~ **已解决** | 受限沙箱禁命名管道，`git push` 报 `couldn't create signal pipe, Win32 error 5`。**用 danger-full-access 跑一次就推上去了**（`ca6d4a9`）。以后 push 遇到这个错，就是权限问题，不是仓库问题 |
 | 2 | **`image_generation.local_path` **16/16 条全部指向不存在的文件**** | 已实测（对着备份逐条核过）：<br>① **3 条**写 `.png` 而实际是 `.jpg`——`stage_refs.py:232` 用 `sniff_image_ext()` 嗅探出真格式后 `os.replace()` 改了**磁盘文件名**，但**没有回写 `local_path` 列**<br>② **16 条全部存的是相对路径** `assets/refs/...`，而 `C.abs_path()` 是按 **C: 工作区**根拼的 → 实际落在 `C:\...\default-workspace\assets\refs\...`（一个**空的**、被 gitignore 的目录），**不是** `D:\dsh-film\assets\refs\...`。跨盘时 `asset_rel()` 本该存绝对路径（HANDOFF 旧版 §二 也这么说），说明这批是**跨盘支持上线前**写的<br>③ 唯一可信的是 **`entity_ref.path`**：16 条全是绝对路径、全部真实存在、全是 `.jpg`<br>**连带风险**：`stage_refs.py:188` 落盘路径写死 `"%s_%s.png"`，接亲戚的接口返回 JPEG 时又会重演。修 `local_path` 的同时应把扩展名改成按嗅探结果定 |
 | 3 | **16 张旧图仍在 `D:\dsh-film\assets\refs\`** | 库里记录已删，文件没删。要删还是留档未定 |
 | 4 | **`checkpoint` 表与现状不一致** | 还留着外卖员版的 `completed + human_approved=1`。**别信它**，见 §二 |
