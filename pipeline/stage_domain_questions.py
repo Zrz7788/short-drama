@@ -80,12 +80,17 @@ def parse_questions(path):
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) < 5 or not QID.match(cells[0]):
+        # ⚠️ 只要**至少 4 列**（编号/问题/回答/出处）就算一条。
+        #    原来是硬要求 5 列（含"为什么影响画面"），结果人手把那一列合并进
+        #    问题描述后，整张表就解析不出来了——**报错在解析器，错在解析器太死**。
+        #    第 5 列（为什么）当可选。
+        if len(cells) < 4 or not QID.match(cells[0]):
             continue
-        ans, src = cells[3], cells[4]
+        ans = cells[2]
+        src = cells[3]
         waived = any(w.lower() in ans.lower() for w in WAIVED)
         answered = waived or (ans not in UNANSWERED and len(ans) >= 2)
-        rows.append({"id": cells[0], "question": cells[1], "why": cells[2],
+        rows.append({"id": cells[0], "question": cells[1], "why": "",
                      "answer": ans, "source": src,
                      "answered": answered, "waived": waived})
     if not rows:
@@ -114,8 +119,8 @@ def write_section(path, questions, dry):
     existing, _ok, _why = parse_questions(path)
     by_q = {r["question"].strip(): r for r in existing}
 
-    lines = ["| 编号 | 问题 | 为什么影响画面 | 回答 | 出处 |",
-             "|---|---|---|---|---|"]
+    lines = ["| 编号 | 问题 | 回答 | 出处 |",
+             "|---|---|---|---|"]
     added = 0
     for i, q in enumerate(questions, 1):
         qid = "Q-%02d" % i
@@ -125,11 +130,15 @@ def write_section(path, questions, dry):
         else:
             ans, src = "待查", ""
             added += 1
-        why = q.get("why") or ""
-        if q.get("affects") and q["affects"] not in why:
+        # "为什么影响画面" 并进问题描述——**不单独占一列**，
+        # 因为列越多，人手维护时越容易把表改坏（实测踩过）。
+        qtext = q["question"].strip()
+        why = (q.get("why") or "").strip()
+        if q.get("affects"):
             why = ("%s（%s）" % (why, q["affects"])).strip("（）")
-        lines.append("| %s | %s | %s | %s | %s |"
-                     % (qid, q["question"].strip(), why, ans, src))
+        if why:
+            qtext = "%s<br>**为什么**：%s" % (qtext, why)
+        lines.append("| %s | %s | %s | %s |" % (qid, qtext, ans, src))
     section = "## %s\n\n%s\n" % (SECTION, "\n".join(lines))
 
     body = re.sub(r"^##\s*%s\s*$.*?(?=^##\s|\Z)" % SECTION,

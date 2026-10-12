@@ -50,20 +50,25 @@ def to_text(raw):
     return "\n".join(ln for ln in lines if ln)
 
 
-def find_chrome():
-    """找一个可用的 Chromium 内核浏览器。"""
+def find_browser():
+    """找一个可用的浏览器。**固定用 Edge，不再用 Chrome。**
+
+    用户指定的：这台机器上 Edge 是 Windows 自带、路径稳定；Chrome 不再尝试。
+
+    ⚠️ 已实测的结论（别再重复试）：本会话里**任何浏览器都起不来**——
+    Chrome 与 Edge 在 `--headless=new` / 旧 `--headless` 下都 0 输出，
+    连 `--version` 都没有，报"无法在当前会话中打开"；
+    提权到 danger-full-access 也一样。所以 `--render` 在本机是**不可用**的，
+    留这条路径只是因为换个环境（或将来会话允许）可能就通了。
+    """
     cands = [
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
-                     r"Google\Chrome\Application\chrome.exe"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                     r"Google\Chrome\Application\chrome.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                     r"Google\Chrome\Application\chrome.exe"),
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
-                     r"Microsoft\Edge\Application\msedge.exe"),
+        # Edge 优先（用户指定）
         os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
                      r"Microsoft\Edge\Application\msedge.exe"),
-        "/usr/bin/google-chrome", "/usr/bin/chromium",
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     r"Microsoft\Edge\Application\msedge.exe"),
+        r"G:\夸克\Quark\quark.exe",
+        "/usr/bin/microsoft-edge",
     ]
     for p in cands:
         if p and os.path.exists(p):
@@ -72,20 +77,20 @@ def find_chrome():
 
 
 def render_with_chrome(url, timeout=60):
-    """用无头 Chrome 渲染后取 DOM。
+    """用无头浏览器渲染后取 DOM（**本机不可用**，见 find_browser 的说明）。
 
-    为什么需要它：很多中文站点（搜索页、百科）是 JS 渲染 + 反爬，
-    直接 urllib 取会拿到空壳或 403。无头浏览器执行 JS、带上真实指纹，
-    所以能过。**这不是绕过登录或付费墙，只是用一个真浏览器正常访问。**
+    为什么保留：很多中文站点（搜索页、百科）是 JS 渲染 + 反爬，直接 urllib 取
+    会拿到空壳或 403。无头浏览器执行 JS、带真实指纹，换个环境就能过。
+    **这不是绕过登录或付费墙，只是用一个真浏览器正常访问。**
 
     返回 (status, ctype, html)；失败抛异常。
     """
     import subprocess
     import shutil
     import tempfile
-    chrome = find_chrome()
+    chrome = find_browser()
     if not chrome:
-        raise RuntimeError("没找到 Chrome/Edge，--render 不可用")
+        raise RuntimeError("没找到 Edge/浏览器，--render 不可用")
     # ⚠️ profile 目录要放在**工作区内**。放系统 temp 会被沙箱拒绝
     #    （实测：PermissionError WinError 5，Chrome 连 profile 都建不出来）。
     base = os.path.join(ROOT := os.path.dirname(
