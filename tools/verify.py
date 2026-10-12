@@ -66,6 +66,7 @@ PIPELINE_SCRIPTS = ["pipeline/common.py", "pipeline/llm.py", "pipeline/ark.py",
                     "pipeline/selftest_ark.py", "pipeline/selftest_e2e.py",
                     "pipeline/selftest_mdimport.py", "pipeline/selftest_domain.py",
                     "pipeline/selftest_layout.py",
+                    "pipeline/selftest_continuity.py",
                     "pipeline/manifest.py", "pipeline/checkpoint.py",
                     "pipeline/run.py", "pipeline/selftest_run.py"]
 
@@ -260,6 +261,7 @@ def check_pipeline():
     run_child("pipeline/selftest_mdimport.py", "第 1 阶段 Markdown 导入通道自检（契约 + 端到端）")
     run_child("pipeline/selftest_domain.py", "第 2 阶段领域事实门禁自检（解析 + 门禁 + 端到端）")
     run_child("pipeline/selftest_layout.py", "布局与领域问题自检（取景量算 + 平面图 + 清单）")
+    run_child("pipeline/selftest_continuity.py", "跨集连续性自检（真假声明对跑）")
     run_child("pipeline/selftest_ark.py", "第 3/4/7/8 阶段自检（假 Ark 服务/轮询/下载/记账/错误处理）")
     run_child("pipeline/selftest_e2e.py", "全链路集成（十阶段串起来，产出真 MP4）", timeout=1800)
     # 跨文档一致性检查：剧本/视觉设定/分镜 与数据库对齐。
