@@ -163,6 +163,12 @@ def load_domain_facts(ep):
     return parse_domain_facts(os.path.join(PROJECT_DIR, "%s.md" % ep["project"]))
 
 
+def load_domain_questions(ep):
+    """问题清单。**未回答的问题同样阻断**——否则问题清单会退化成没人看的清单。"""
+    from pipeline import stage_domain_questions as DQ
+    return DQ.parse_questions(os.path.join(PROJECT_DIR, "%s.md" % ep["project"]))
+
+
 def facts_digest(facts):
     """给提示词的领域事实清单。**假设条目显式标注不可用**。"""
     if not facts:
@@ -249,6 +255,8 @@ def main():
                     help="允许实体依据「假设·待验证」的领域事实（默认阻断）")
     ap.add_argument("--allow-missing-domain-facts", action="store_true",
                     help="项目档案缺「领域事实」章时也继续（默认阻断，账会失真）")
+    ap.add_argument("--allow-open-questions", action="store_true",
+                    help="领域问题清单里还有未回答的问题时也继续（默认阻断）")
     L.add_llm_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -274,6 +282,29 @@ def main():
         con.close()
         return rep.finish()
     rep.add("领域事实可用", facts_ok, why)
+
+    # 问题清单：**未回答的必须拦住**。这一关防的是"没意识到自己不懂"——
+    # 第 1 集就是因为没人问过"化妆间和冷柜间是不是同一间"，才把两者合成了一间屋。
+    qrows, q_ok, q_why = load_domain_questions(ep)
+    if q_ok:
+        left = [r for r in qrows if not r["answered"]]
+        if left and not args.allow_open_questions:
+            rep.add("领域问题已全部回答", False,
+                    "%d 条未回答：%s" % (len(left),
+                                        "、".join(r["id"] for r in left[:6])))
+            for r in left[:6]:
+                rep.info("  %s %s" % (r["id"], r["question"][:58]))
+            rep.info("把答案填进 knowledge/03-项目档案/%s.md 的「## 领域问题」表；"
+                     "确与画面无关的填「无关」。" % ep["project"])
+            rep.info("确实要先跳过：加 --allow-open-questions。")
+            con.close()
+            return rep.finish()
+        rep.add("领域问题已全部回答", True,
+                "%d 条（无关 %d 条）" % (len(qrows),
+                                      sum(1 for r in qrows if r["waived"])))
+    else:
+        # 没有清单章不算错——老项目还没有。但要提醒，因为它正是防"自己不知道"的机制。
+        rep.add("领域问题清单", True, "无清单章（%s）——建议先跑第 1.5 阶段" % q_why)
 
     try:
         prompt = build_prompt(con, ep, facts)

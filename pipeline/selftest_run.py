@@ -120,12 +120,14 @@ stages:
     print("\n=== 2. 运行单元展平 ===")
     units = m.run_units()
     keys = [u.key for u in units]
-    rep.add("运行单元 14 个（10 阶段 + art 拆 3 + motion 拆 3 − 2 个父阶段）",
-            len(units) == 14, "%d 个" % len(units))
+    rep.add("运行单元 15 个（11 阶段 + art 拆 3 + motion 拆 3 − 2 个父阶段）",
+            len(units) == 15, "%d 个" % len(units))
     rep.add("art 与 motion 的父阶段不作为单元",
             "art" not in keys and "motion" not in keys)
-    rep.add("单元顺序正确",
-            keys[:4] == ["spec", "script", "cast", "art/characters"],
+    # 第 1.5 阶段（领域问题）插在 script 与 cast 之间——它是"承认自己不懂"的那一步，
+    # 必须早于任何出图，否则就会像第 1 集那样把编出来的职业常识一路画进首帧。
+    rep.add("单元顺序正确（domain_questions 在 script 之后、cast 之前）",
+            keys[:4] == ["spec", "script", "domain_questions", "cast"],
             " → ".join(keys[:4]))
 
     con, eid = fresh_db()
@@ -185,6 +187,21 @@ stages:
 
     # ---------------------------------------------------------- 5 存档不销毁
     print("\n=== 5. 存档版本不销毁 ===")
+    # 先按顺序走完 domain_questions（第 1.5 阶段），否则开 cast 会被门禁拦。
+    # 这本身就是一条断言：**新增的中间阶段确实排在了 cast 前面。**
+    try:
+        ck.begin(con, eid, "cast", m)
+        jumped = True
+    except ck.GateViolation:
+        jumped = False
+    rep.add("domain_questions 未完成时开 cast → 被拦", not jumped)
+
+    ck.begin(con, eid, "domain_questions", m)
+    ck.approve(con, eid, "domain_questions", "问题清单够狠", m)
+    ck.finish(con, ck.current(con, eid, "domain_questions")["id"], m=m)
+    rep.add("domain_questions 走完后放行",
+            ck.current(con, eid, "domain_questions")["status"] == "completed")
+
     ck.begin(con, eid, "cast", m)
     r2 = ck.current(con, eid, "cast")
     ck.fail(con, r2["id"], "模拟失败")

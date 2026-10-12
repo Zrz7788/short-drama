@@ -118,10 +118,31 @@ stages:
       - 各场 duration_s 合计与目标时长偏差 ≤ 20%
       - 技能索引器（screenplay_index.py）复核 review_status=clean
 
+  # ---------------------------------------------------------------- 1.5 领域问题
+  # 把"我不知道"变成可见的、必须回答的清单。不负责查证（那需要外部资料），
+  # 只负责问出来并卡住下游。第 1 集就是因为**没人问过**"化妆间和冷柜间是不是
+  # 同一间"，才把两者合成了一间屋，一路错到首帧。
+  - name: domain_questions
+    skill: pipelines/short-drama/spec-director
+    required_artifacts_in: [script]
+    produces:
+      - domain_questions
+    tools_available:
+      - stage_domain_questions
+    checkpoint_required: true
+    human_approval_default: true
+    review_focus:
+      - 问题是否**只问影响画面的**职业细节（空间/载体/动作/用具），没有问剧情
+      - 问题是否具体可回答（不要"殡仪馆的一切是怎样的"这种）
+      - 是否有**我们已经在剧本里当成事实写下、但其实没依据**的细节
+    success_criteria:
+      - knowledge/03-项目档案/<剧名>.md 有可解析的「## 领域问题」表（Q-01…）
+      - 每条问题都填了回答与出处（确与画面无关的填「无关」）
+
   # ---------------------------------------------------------------- 2 实体
   - name: cast
     skill: pipelines/short-drama/cast-director
-    required_artifacts_in: [script]
+    required_artifacts_in: [script, domain_questions]
     produces:
       - entity_roster
     tools_available:
