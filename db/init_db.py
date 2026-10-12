@@ -34,7 +34,7 @@ PRICES = [
 ]
 
 # schema 版本。加表改 schema.sql 即可；**加列必须同时登记到 COLUMN_MIGRATIONS**。
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # 给已存在的表补列。CREATE TABLE IF NOT EXISTS 对已存在的表完全不动，
 # 所以每个新增列都要在这里显式登记，否则老库升不上来。
@@ -135,6 +135,23 @@ COLUMN_MIGRATIONS = [
     #    模型做不到，看起来就是纯漂移。所以必须点名归属到唯一一镜。
     ("shot", "on_screen_text",
      "ALTER TABLE shot ADD COLUMN on_screen_text TEXT"),
+    # ---- v9：实体的领域事实溯源 ----
+    # 依据一次真实翻车：第 1 集我把「冷柜间」写成化妆间的别名，又把冷柜/推车/
+    # 化妆台塞进一间屋，模型忠实照画 —— 于是**空间、载体、动作三样全错**。
+    # 根因不是模型，是**我现场编了一个职业的常识**，而当时没有任何地方
+    # 承载"这个职业真实是什么样"。
+    #
+    # 所以：location / prop 实体必须能指回 `knowledge/03-项目档案/<剧名>.md`
+    # 的「领域事实」表里某一条。指不回去 = 凭想象编的 = 第 3/4 阶段不许出图。
+    # 实体描述是生图提示词的**直接输入**，错了每张图 ¥0.30，必须先拦。
+    #
+    # 人物、以及纯剧情道具（一封信、一张化验单）不需要领域事实：
+    # domain_fact 填 'story' 显式声明，而不是留空——留空分不清"不需要"
+    # 和"忘了填"。
+    ("entity", "domain_fact",
+     "ALTER TABLE entity ADD COLUMN domain_fact TEXT"),
+    ("entity", "domain_source",
+     "ALTER TABLE entity ADD COLUMN domain_source TEXT"),
 ]
 
 # 目标要求覆盖的数据域 -> 承载它们的表

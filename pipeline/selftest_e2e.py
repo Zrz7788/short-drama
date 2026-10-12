@@ -151,6 +151,21 @@ def main():
     con.close()
     rep.add("项目与第 1 集已建", True, "episode_id=%d" % eid)
 
+    # ⚠️ 项目档案（含「领域事实」章）。第 2 阶段会拿它做**硬门禁**——没有就阻断
+    # 后续所有阶段，所以端到端自检必须给它一份。跑完删掉，不污染生产档案。
+    E2E_BRIEF = os.path.join(C.ROOT, "knowledge", "03-项目档案", "端到端自检剧.md")
+    _e2e_brief = not os.path.exists(E2E_BRIEF)
+    if _e2e_brief:
+        os.makedirs(os.path.dirname(E2E_BRIEF), exist_ok=True)
+        with open(E2E_BRIEF, "w", encoding="utf-8") as f:
+            f.write("# 端到端自检剧\n\n## 领域事实\n\n### 已确认\n\n"
+                    "| 编号 | 类别 | 事实 | 出处 | 置信度 |\n|---|---|---|---|---|\n"
+                    "| F-01 | 空间 | 城中村出租屋的常见结构与年代特征 | 自检夹具 | 高 |\n"
+                    "| F-02 | 空间 | 深夜医院走廊的空间与照明特征 | 自检夹具 | 高 |\n"
+                    "| F-03 | 空间 | 老旧居民楼天台的常见结构与铁栏杆 | 自检夹具 | 高 |\n\n"
+                    "## 角色\n\n见数据库。\n")
+    rep.add("自检项目的项目档案已就位", os.path.exists(E2E_BRIEF))
+
     print("\n=== 1-2. 剧本 → 实体（LLM 阶段）===")
     stage(rep, "第 1 阶段 生成剧本", "stage_script.py",
           ["--episode-id", str(eid), "--db", TEST_DB,
@@ -367,6 +382,9 @@ def main():
     llm_srv.shutdown()
     ark_srv.shutdown()
     code = rep.finish()
+    # 自检造的项目档案要清掉，否则会留在知识库里（它不是真的项目）
+    if _e2e_brief and os.path.exists(E2E_BRIEF):
+        os.remove(E2E_BRIEF)
     if args.keep:
         print("\n产物保留在:", os.path.relpath(TEST_ROOT, C.ROOT))
         print("  成片:", os.path.relpath(out1, C.ROOT))

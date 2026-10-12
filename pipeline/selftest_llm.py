@@ -60,27 +60,47 @@ ENTITY_OBJ = {
     "entities": [
         {"kind": "character", "name": "林薇", "alias": "女主、薇薇", "tier": "main",
          "description": "32岁女性，东亚面孔，齐肩黑直发，杏眼，左眉尾浅疤",
-         "style_note": "偏冷色调，常穿深灰"},
+         "style_note": "偏冷色调，常穿深灰", "domain_fact": "story"},
         {"kind": "character", "name": "陈默", "alias": "", "tier": "main",
          "description": "40岁男性，寸头，方脸，右眼下有一颗痣",
-         "style_note": "硬朗，多穿深色风衣"},
+         "style_note": "硬朗，多穿深色风衣", "domain_fact": "story"},
         {"kind": "character", "name": "护士", "alias": "", "tier": "background",
          "description": "年轻女性护士，白色制服，戴蓝色口罩",
-         "style_note": "无"},
+         "style_note": "无", "domain_fact": "story"},
+        # ⚠️ 场景必须回领域事实编号（v9 门禁）——这里回自检项目档案里的 F-01/F-02
         {"kind": "location", "name": "出租屋", "alias": "", "tier": "main",
          "description": "十平米单间，铁架床，墙面有水渍，唯一光源是床头台灯",
-         "style_note": "暖黄台灯，2010年代城中村"},
+         "style_note": "暖黄台灯，2010年代城中村", "domain_fact": "F-01"},
         {"kind": "location", "name": "医院走廊", "alias": "", "tier": "secondary",
          "description": "深夜空走廊，日光灯管发白，地面反光",
-         "style_note": "冷白光，高对比"},
+         "style_note": "冷白光，高对比", "domain_fact": "F-02"},
         {"kind": "location", "name": "天台", "alias": "", "tier": "main",
          "description": "老旧居民楼天台，水泥地面有裂缝，四周是齐腰铁栏杆",
-         "style_note": "夜，城市灯光背景，风大"},
+         "style_note": "夜，城市灯光背景，风大", "domain_fact": "F-01"},
         {"kind": "prop", "name": "化验单", "alias": "那张纸", "tier": "secondary",
          "description": "A5 大小的医院化验单，被攥出褶皱",
-         "style_note": "白纸黑字，边缘皱"},
+         "style_note": "白纸黑字，边缘皱", "domain_fact": "story"},
     ],
 }
+
+# ⚠️ 自检项目也要有一份项目档案（含「领域事实」章），否则第 2 阶段的门禁会拦。
+# 项目名与生产项目不同名，不会互相干扰；跑完删掉。
+TEST_PROJECT = "自检剧"
+TEST_BRIEF = """# 自检剧
+
+## 领域事实
+
+### 已确认
+
+| 编号 | 类别 | 事实 | 出处 | 置信度 |
+|---|---|---|---|---|
+| F-01 | 空间 | 城中村单间与老旧居民楼天台的常见结构与年代特征 | 自检夹具 | 高 |
+| F-02 | 空间 | 深夜医院走廊的空间与照明特征 | 自检夹具 | 高 |
+
+## 角色
+
+见数据库。
+"""
 
 # 分镜计划：14 个镜头，合计 79 秒，draft 与 direct 都有，含单人/双人/纯空镜
 SCENE_LOC = {1: "出租屋", 2: "出租屋", 3: "医院走廊", 4: "天台", 5: "天台", 6: "天台"}
@@ -241,12 +261,23 @@ def main():
     rep.add("临时库建立", p.returncode == 0)
 
     con = C.connect(TEST_DB)
-    pid = con.execute("INSERT INTO project (name, logline) VALUES ('自检剧','测试')"
-                      ).lastrowid
+    pid = con.execute("INSERT INTO project (name, logline) VALUES (?, '测试')",
+                      (TEST_PROJECT,)).lastrowid
     eid = con.execute("INSERT INTO episode (project_id, seq, target_seconds) "
                       "VALUES (?,1,80)", (pid,)).lastrowid
     con.commit()
     con.close()
+
+    # 项目档案（含「领域事实」章）。第 2 阶段的门禁要求它必须存在且可解析，
+    # 否则直接阻断——这里给自检项目补一份，跑完删掉，不污染生产档案。
+    BRIEF_PATH = os.path.join(C.ROOT, "knowledge", "03-项目档案",
+                              "%s.md" % TEST_PROJECT)
+    _brief_made = not os.path.exists(BRIEF_PATH)
+    if _brief_made:
+        os.makedirs(os.path.dirname(BRIEF_PATH), exist_ok=True)
+        with open(BRIEF_PATH, "w", encoding="utf-8") as f:
+            f.write(TEST_BRIEF)
+    rep.add("自检项目的项目档案已就位", os.path.exists(BRIEF_PATH))
 
     # ---- 3. 第 1 阶段：剧本 ----
     print("\n=== 3. 第 1 阶段 stage_script.py ===")
@@ -336,13 +367,19 @@ def main():
     with open(fj, "w", encoding="utf-8") as f:
         json.dump({"entities": [{"kind": "prop", "name": "天台铁门", "alias": "",
                                  "tier": "main", "description": "锈迹斑斑的铁门，漆面剥落",
-                                 "style_note": "潮湿"}]}, f, ensure_ascii=False)
+                                 "style_note": "潮湿",
+                                 # 纯剧情道具：显式声明不需要领域事实（v9）
+                                 "domain_fact": "story"}]}, f, ensure_ascii=False)
     p = run_stage("stage_entities.py",
                   ["--episode-id", str(eid), "--db", TEST_DB, "--from-json", fj])
     con = C.connect(TEST_DB)
-    got = con.execute("SELECT role FROM entity WHERE name='天台铁门'").fetchone()
+    got = con.execute("SELECT role, domain_fact FROM entity WHERE name='天台铁门'"
+                      ).fetchone()
     rep.add("外部 JSON 成功入库", got is not None and got["role"] == "main",
-            "role=%s" % (got["role"] if got else "-"))
+            "role=%s domain_fact=%s" % (got["role"] if got else "-",
+                                        got["domain_fact"] if got else "-"))
+    rep.add("domain_fact 也入库了", got is not None and got["domain_fact"] == "story",
+            got["domain_fact"] if got else "-")
     con.close()
 
     # ---- 8. 坏输出要干净失败，不能写脏库 ----
@@ -502,6 +539,9 @@ def main():
 
     srv.shutdown()
     code = rep.finish()
+    # 自检造的项目档案要清掉，否则会留在知识库里（它不是真的项目）
+    if _brief_made and os.path.exists(BRIEF_PATH):
+        os.remove(BRIEF_PATH)
     if args.keep:
         print("\n产物保留在:", os.path.relpath(TEST_ROOT, C.ROOT))
     else:

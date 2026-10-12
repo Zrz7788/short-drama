@@ -70,6 +70,7 @@ stages:
     skill: pipelines/short-drama/spec-director
     produces:
       - delivery_spec
+      - project_brief        # knowledge/03-项目档案/<剧名>.md，含「领域事实」章
       - decision_log
     tools_available: []
     checkpoint_required: true
@@ -78,9 +79,14 @@ stages:
       - 交付分辨率是否已定——它决定后面能用哪些模型档位（1080P 只能 2.5 或 2.0 pro）
       - 单集时长与集数是否都已定——只问「80 秒多少钱」缺一个变量
       - 音频路线是否已定（Seedance 原生音频 vs 外部 TTS + reference_audio）——它决定台词怎么写
+      - ⭐ **「领域事实」章是否已写**——故事发生在哪个职业/场所，真实情况是什么。
+        它是所有 location / prop 实体的上游；第 2 阶段会拿它做硬门禁。
+        没有这一章，第 3/4 阶段一张图都不许出
     success_criteria:
       - project 表有 aspect_ratio 与 target_episode_seconds
       - decision_log 至少记录分辨率、集数、音频路线三项，各带理由
+      - **knowledge/03-项目档案/<剧名>.md 存在，且有可解析的「## 领域事实」表**
+        （第一列是 F-01 这样的编号，带出处与置信度）
 
   # ---------------------------------------------------------------- 1 剧本
   # 真源是 `剧集/EP###/剧本.md`（agent 按 short-drama-write 技能写），

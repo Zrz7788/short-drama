@@ -16,6 +16,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,11 +54,135 @@ SPEC = {
         "tier": str,
         "description": str,
         "style_note": L.OPTIONAL_STR,
+        # 领域事实溯源（v9）。location / prop 必须回一个 F-xx 编号；
+        # 人物与纯剧情道具写 'story'。**必须显式填**：
+        # 留空分不清"不需要"和"忘了填"，所以空值会在 persist 里被拦。
+        "domain_fact": str,
     }],
 }
 
+# 不需要领域事实的类别：人物是剧情设定；道具要分"剧情道具"和"职业用具"，
+# 由模型自己按 domain_fact 取值区分（'story' vs 'F-xx'）。
+DOMAIN_KINDS = ("location", "prop")
+FACT_ID = re.compile(r"^F-\d+$")
+ASSUMED_ID = re.compile(r"^F-9\d+$")   # 90+ 段是"假设·待验证"
 
-def build_prompt(con, ep):
+PROJECT_DIR = os.path.join(C.ROOT, "knowledge", "03-项目档案")
+
+
+def parse_domain_facts(path):
+    """解析项目档案里的「领域事实」表。
+
+    返回 ({编号: {"sentence","source","confidence","assumed"}}, ok, why)。
+
+    只认 Markdown 表格行。**已确认**与**假设**分开：
+    编号 `F-9x` 或置信度含"低/待验证"的算假设，默认不许用来出图。
+    """
+    if not os.path.exists(path):
+        return {}, False, "项目档案不存在：%s" % path
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+
+    # 只取「## 领域事实」到下一个二级标题之间
+    m = re.search(r"^##\s*领域事实\s*$(.*?)(?=^##\s|\Z)",
+                  text, re.M | re.S)
+    if not m:
+        return {}, False, "项目档案里没有「## 领域事实」这一章"
+    body = m.group(1)
+
+    facts = {}
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        fid = cells[0]
+        if not FACT_ID.match(fid):
+            continue
+        source = cells[3]
+        conf = cells[4]
+        assumed = bool(ASSUMED_ID.match(fid)) or any(
+            k in conf for k in ("低", "待验证")) or source in ("无", "")
+        facts[fid] = {"sentence": cells[2], "source": source,
+                      "confidence": conf, "assumed": assumed}
+    if not facts:
+        return {}, False, ("「领域事实」章里没有可解析的表格行"
+                           "（第一列要是 F-01 这样的编号）")
+    return facts, True, "%d 条" % len(facts)
+
+
+def domain_gate(con, ep, data, facts, ok, why, allow_assumed):
+    """领域事实门禁。返回 (blocks, warns)。
+
+    **为什么是 block 而不是 warn**：实体描述是生图提示词的直接输入，
+    错了每张图 ¥0.30，而且错图会成为首帧参考、把错锁进下游。
+    第一集就是这样三样全错（空间/载体/动作）——那时没有任何东西挡它。
+    """
+    blocks, warns = [], []
+    if not ok:
+        # 与 main() 里的提前拦截用**同一句话**开头——两处措辞不一致的话，
+        # 自检和运维脚本按关键字判断就会漏。实测被自检抓到过一次。
+        return (["领域事实不可用：%s\n"
+                 "    第 2 阶段无法确认实体是真实存在的还是编的。\n"
+                 "    先补 knowledge/03-项目档案/%s.md 的「## 领域事实」章"
+                 "（模板见该目录 README）。" % (why, ep["project"])], warns)
+
+    ents = data["entities"]
+    for e in ents:
+        tag = "%s「%s」" % (e["kind"], e["name"])
+        df = str(e.get("domain_fact") or "").strip()
+        if not df:
+            blocks.append("%s 没填 domain_fact。"
+                          "location/prop 要填 F-xx 编号；"
+                          "人物或纯剧情道具填 story（**必须显式写**）" % tag)
+            continue
+        if df == "story":
+            if e["kind"] == "location":
+                blocks.append("%s 是场景，场景不能标 story——"
+                              "场景的真实布局必须有领域事实依据" % tag)
+            continue
+        if df not in facts:
+            blocks.append("%s 的 domain_fact=%s 在「领域事实」表里不存在" % (tag, df))
+            continue
+        f = facts[df]
+        if f["assumed"] and not allow_assumed:
+            blocks.append("%s 依据的 %s 是**假设·待验证**（出处：%s，置信度：%s）：%s\n"
+                          "    先用真实资料核实这条事实并补出处，"
+                          "或加 --allow-assumed-facts 明确承担风险"
+                          % (tag, df, f["source"] or "无", f["confidence"],
+                             f["sentence"][:40]))
+        elif f["assumed"]:
+            warns.append("%s 依据的是未验证事实 %s——已按 --allow-assumed-facts 放行"
+                         % (tag, df))
+    return blocks, warns
+
+
+def load_domain_facts(ep):
+    return parse_domain_facts(os.path.join(PROJECT_DIR, "%s.md" % ep["project"]))
+
+
+def facts_digest(facts):
+    """给提示词的领域事实清单。**假设条目显式标注不可用**。"""
+    if not facts:
+        return ""
+    confirmed = {k: v for k, v in sorted(facts.items()) if not v["assumed"]}
+    assumed = {k: v for k, v in sorted(facts.items()) if v["assumed"]}
+    out = []
+    if confirmed:
+        out.append("### 已确认（可以依据）")
+        for k, v in confirmed.items():
+            out.append("- %s：%s" % (k, v["sentence"]))
+    if assumed:
+        out.append("")
+        out.append("### 假设·未验证（**禁止**作为实体描述的依据）")
+        for k, v in assumed.items():
+            out.append("- %s：%s" % (k, v["sentence"]))
+    return "\n".join(out)
+
+
+def build_prompt(con, ep, facts):
     row = con.execute(
         "SELECT id, content, version FROM script "
         "WHERE episode_id = ? AND is_current = 1", (ep["id"],)).fetchone()
@@ -70,7 +195,9 @@ def build_prompt(con, ep):
         "- 第%d场 %s【%s】%s%s" % (s["seq"], s["slug"], s["beat"], s["action"],
                                  ("  台词：" + s["dialogue"]) if s["dialogue"] else "")
         for s in scenes)
-    return L.load_prompt(PROMPT, script_content=row["content"], scenes_digest=digest)
+    return L.load_prompt(PROMPT, script_content=row["content"],
+                         scenes_digest=digest,
+                         domain_facts=facts_digest(facts))
 
 
 def persist(con, ep, data, dry):
@@ -96,13 +223,15 @@ def persist(con, ep, data, dry):
         for e in ents:
             con.execute(
                 "INSERT INTO entity (project_id, kind, name, alias, role,"
-                " description, style_note) VALUES (?,?,?,?,?,?,?) "
+                " description, style_note, domain_fact) VALUES (?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(project_id, kind, name) DO UPDATE SET "
                 "alias = excluded.alias, role = excluded.role, "
-                "description = excluded.description, style_note = excluded.style_note",
+                "description = excluded.description, style_note = excluded.style_note,"
+                " domain_fact = excluded.domain_fact",
                 (ep["project_id"], e["kind"], e["name"].strip(),
                  (e.get("alias") or "").strip(), e["tier"],
-                 e["description"].strip(), (e.get("style_note") or "").strip()))
+                 e["description"].strip(), (e.get("style_note") or "").strip(),
+                 str(e.get("domain_fact") or "").strip()))
         con.commit()
 
     by_kind, by_tier = {}, {}
@@ -116,6 +245,10 @@ def persist(con, ep, data, dry):
 def main():
     ap = argparse.ArgumentParser(description="第 2 阶段：提取实体并分级")
     ap.add_argument("--episode-id", type=int, required=True)
+    ap.add_argument("--allow-assumed-facts", action="store_true",
+                    help="允许实体依据「假设·待验证」的领域事实（默认阻断）")
+    ap.add_argument("--allow-missing-domain-facts", action="store_true",
+                    help="项目档案缺「领域事实」章时也继续（默认阻断，账会失真）")
     L.add_llm_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -129,8 +262,21 @@ def main():
     rep = C.Report("第 2 阶段 · 提取实体")
     print("集：第 %s 集 项目：%s\n" % (ep["seq"], ep["project"]))
 
+    # 领域事实门禁（v9）。**先读事实再问模型**——顺序反了就会先编出实体再来找依据。
+    facts, facts_ok, why = load_domain_facts(ep)
+    if not facts_ok and not args.allow_missing_domain_facts:
+        rep.add("领域事实可用", False, why)
+        rep.info("实体描述是生图提示词的直接输入，错了每张图 ¥0.30，且错图会被"
+                 "当成首帧参考把错锁进下游。所以这一关必须在出图之前。")
+        rep.info("补法：knowledge/03-项目档案/%s.md 写「## 领域事实」章"
+                 "（模板见该目录 README）。" % ep["project"])
+        rep.info("确实要先跳过：加 --allow-missing-domain-facts。")
+        con.close()
+        return rep.finish()
+    rep.add("领域事实可用", facts_ok, why)
+
     try:
-        prompt = build_prompt(con, ep)
+        prompt = build_prompt(con, ep, facts)
     except L.LLMError as e:
         rep.add("现行剧本存在", False, str(e))
         con.close()
@@ -152,6 +298,24 @@ def main():
             obj = L.chat_json([{"role": "user", "content": prompt}], SPEC, "实体",
                               base_url=args.base_url, model=args.model)
             rep.info("来源：模型调用")
+
+        blocks, warns = domain_gate(con, ep, obj, facts, facts_ok, why,
+                                    args.allow_assumed_facts)
+        if blocks:
+            for b in blocks:
+                rep.add("实体可溯源到领域事实", False, b)
+            rep.info("这一关挡的是「凭想象编的实体」。它比出图便宜得多——"
+                     "一张图 ¥0.30，一个错实体会污染它所属的每一张图。")
+            rep.info("修法：改剧本/改档案，让每个 location、prop 都能指回一条已确认事实；"
+                     "确实不需要领域事实的（人物、一封信）显式写 domain_fact=story。")
+            con.close()
+            return rep.finish()
+        rep.add("实体可溯源到领域事实", True,
+                "%d 个实体 %s" % (len(obj["entities"]),
+                                  "（含未验证事实，已显式放行）" if warns else ""))
+        for w in warns:
+            rep.add("待确认（warn）", True, w)
+
         by_kind, by_tier, images = persist(con, ep, obj, args.dry_run)
     except L.LLMError as e:
         rep.add("产出可用", False, str(e)[:100])

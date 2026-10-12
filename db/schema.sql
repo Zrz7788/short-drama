@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS entity (
     voice_id    TEXT,                    -- 仅人物有意义
     notes       TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    -- 领域事实溯源（v9）。location / prop 必须指回
+    -- `knowledge/03-项目档案/<剧名>.md` 的「领域事实」表某一条（如 F-03）；
+    -- 人物与纯剧情道具填 'story'，显式声明"不需要领域事实"。
+    -- ⚠️ 列顺序必须与 COLUMN_MIGRATIONS 的追加顺序一致——**追加在末尾**，
+    --    插到中间会让新建的库与升级上来的库列顺序不同（踩过 3 次）。
+    domain_fact   TEXT,
+    domain_source TEXT,
     UNIQUE (project_id, kind, name)
 );
 
