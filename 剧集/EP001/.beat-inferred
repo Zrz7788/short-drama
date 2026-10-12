@@ -2,5 +2,5 @@
 # 剧本原文没有 beat 字段；duration_s 来源：项目未声明语速，按（对白可发声字数＋动作段数×8）的权重**分配**本集目标 80 秒——这是分配不是测量
 # 核对后用 --beat 覆盖，或直接改 scene 表
 
-EP001-SC001  seq=1  beat=钩子  duration_s=48.3
-EP001-SC002  seq=2  beat=扣子  duration_s=31.7
+EP001-SC001  seq=1  beat=钩子  duration_s=47.9
+EP001-SC002  seq=2  beat=扣子  duration_s=32.1

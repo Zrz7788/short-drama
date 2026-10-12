@@ -143,19 +143,29 @@ def domain_gate(con, ep, data, facts, ok, why, allow_assumed):
                 blocks.append("%s 是场景，场景不能标 story——"
                               "场景的真实布局必须有领域事实依据" % tag)
             continue
-        if df not in facts:
-            blocks.append("%s 的 domain_fact=%s 在「领域事实」表里不存在" % (tag, df))
+        # ⚠️ 容忍逗号分隔的多条：模型常写 `F-01,F-04,F-16`（意思是"这些都对得上"）。
+        #    字段设计上只该写一条，但**为了一个格式选择让整次模型调用白花**
+        #    不划算——拆开逐条校验，全部有效才放行，多条只给提醒。
+        ids = [x.strip() for x in re.split(r"[,，、/\s]+", df) if x.strip()]
+        unknown = [x for x in ids if x not in facts]
+        if unknown:
+            blocks.append("%s 的 domain_fact=%s 里这几项在「领域事实」表里不存在：%s"
+                          % (tag, df, "、".join(unknown)))
             continue
-        f = facts[df]
-        if f["assumed"] and not allow_assumed:
+        assumed = [x for x in ids if facts[x]["assumed"]]
+        if assumed and not allow_assumed:
+            f = facts[assumed[0]]
             blocks.append("%s 依据的 %s 是**假设·待验证**（出处：%s，置信度：%s）：%s\n"
                           "    先用真实资料核实这条事实并补出处，"
                           "或加 --allow-assumed-facts 明确承担风险"
-                          % (tag, df, f["source"] or "无", f["confidence"],
-                             f["sentence"][:40]))
-        elif f["assumed"]:
+                          % (tag, "、".join(assumed), f["source"] or "无",
+                             f["confidence"], f["sentence"][:40]))
+        elif assumed:
             warns.append("%s 依据的是未验证事实 %s——已按 --allow-assumed-facts 放行"
-                         % (tag, df))
+                         % (tag, "、".join(assumed)))
+        elif len(ids) > 1:
+            warns.append("%s 的 domain_fact 写了 %d 条（%s）——建议只留最直接那条"
+                         % (tag, len(ids), df))
     return blocks, warns
 
 
