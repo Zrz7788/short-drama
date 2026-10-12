@@ -270,6 +270,16 @@ def check_pipeline():
     if os.path.exists(_lint) and os.path.isdir(os.path.join(ROOT, "剧集", "EP001")):
         run_child("tools/lint_cross_doc.py", "跨文档一致性（剧本/视觉设定/分镜 ↔ 数据库）",
                   extra=["--episode-id", "1"], allow_nonzero=True)
+    # 逻辑审计（四层） + 跨集连续性：只在两集文档都在时跑
+    _la = os.path.join(ROOT, "tools", "logic_audit.py")
+    _has2 = os.path.exists(os.path.join(ROOT, "剧集", "EP002", "剧本.md"))
+    if os.path.exists(_la) and _has2:
+        run_child("tools/logic_audit.py", "逻辑审计（场景内/集内/跨集/时间线四层）",
+                  extra=["--episodes", "1,2"], allow_nonzero=True)
+    _ct = os.path.join(ROOT, "tools", "continuity.py")
+    if os.path.exists(_ct) and _has2:
+        run_child("tools/continuity.py", "跨集连续性（上一集的线，本集接没接）",
+                  extra=["--from", "1", "--to", "2"], allow_nonzero=True)
 
 
 def check_selftest():
