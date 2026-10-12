@@ -102,7 +102,11 @@ def main():
     heads = parse_headings(docs["视觉设定"], 3)
     # 「造型」小节是造型不是实体，单独放行
     STYLE_KEYS = ("造型",)
-    unmatched, loose = [], []
+    unmatched, loose, states = [], [], []
+    # 「物上的痕迹/状态」不是独立实体 —— 它是某个实体的**状态说明**。
+    # 例：「玫瑰色痕迹（白单）」是《棉质遗体盖单》的状态，不该另建实体，
+    # 但正文确实需要一个可见的连续性锁，所以允许它作为状态小节存在。
+    STATE_HINTS = ("痕迹", "污渍", "血迹", "水渍", "划痕", "裂口", "褶皱", "变体")
     for raw, base in heads:
         if any(k in raw for k in STYLE_KEYS):
             continue
@@ -114,7 +118,11 @@ def main():
         if any(nb == norm(a) for v in ents.values() for a in v["alias"]):
             loose.append((raw, "是别名"))
             continue
-        # ③ 只是名字相似 —— **不算对上**，要报出来
+        # ③ 物上的痕迹/状态 —— 挂到括号里那个实体上，不算缺实体
+        if any(h in raw for h in STATE_HINTS):
+            states.append(raw)
+            continue
+        # ④ 只是名字相似 —— **不算对上**，要报出来
         sim = [k for k in ents if norm(k) and (nb in norm(k) or norm(k) in nb)]
         if sim:
             loose.append((raw, "名字与库里的「%s」相似但不一致" % "、".join(sim[:3])))
@@ -129,6 +137,21 @@ def main():
         # （"狼来了"），所以降为提示；但正文用哪个叫法仍需统一，故保留可见。
         notes.append("视觉设定 的「%s」%s（非缺陷，但提示词请统一用库里的规范名）"
                      % (raw, why))
+    for raw in states:
+        # 物的状态：不另建实体，但要确认主实体在库里存在
+        m = re.search(r"[（(](.+?)[）)]", raw)
+        owner = m.group(1) if m else ""
+        ob = norm(re.sub(r"[（(].*?[）)]", "", owner))
+        known = (owner and (owner in ents or
+                            any(ob and (ob in norm(k) or norm(k) in ob) for k in ents)
+                            or any(ob == norm(a) for v in ents.values()
+                                   for a in v["alias"])))
+        if known:
+            notes.append("视觉设定 的「%s」是按**状态**记的（主实体「%s」在库里）——"
+                         "不另建实体，这是对的" % (raw, owner))
+        else:
+            warns.append("视觉设定 的「%s」看起来是某实体的状态，但括号里的"
+                         "「%s」在库里找不到主实体" % (raw, owner or "（未标注）"))
 
     # ---------- 2) 库实体 → 文档覆盖 ----------
     vis_text = docs["视觉设定"]
@@ -191,10 +214,23 @@ def main():
             notes.append("分镜时长合计 %.1f 秒" % tot)
             if tgt:
                 gap = tgt - tot
+                # 差值若在分镜里**明确解释了**，就算已裁定，降为提示。否则才提醒。
+                # ⚠️ 必须认准"裁定标记"本身，不能用「转场」「呼吸」这种泛词——
+                #    实测踩过：分镜里另有"运镜：手持轻微呼吸感"，
+                #    泛词正则匹配到它，于是**删掉裁定说明后仍然报"已裁定"**，
+                #    负向测试没抓住（等于这个检查是假的）。
+                explained = bool(re.search(
+                    r"差\s*[\d.]+\s*秒\s*不补|切点总长[\s\S]{0,200}?不补|"
+                    r"差值\s*不补|留白不补", shot_text))
                 if abs(gap) >= 3:
-                    warns.append("分镜时长 %.1f 秒 与分集目标 %.1f 秒 差 %+.1f 秒"
-                                 "（分镜偏短则节奏会赶，偏长则超集时长）"
-                                 % (tot, tgt, gap))
+                    msg = ("分镜切点总长 %.1f 秒 与分集成片目标 %.1f 秒 差 %+.1f 秒"
+                           % (tot, tgt, gap))
+                    if explained:
+                        notes.append(msg + "——分镜已写明该差值用于转场/字幕/呼吸，"
+                                           "属**已裁定**，不算问题")
+                    else:
+                        warns.append(msg + "（分镜偏短则节奏会赶，偏长则超集时长；"
+                                           "若是有意留白，请在分镜里写明理由）")
                 else:
                     notes.append("与分集目标 %.1f 秒相差 %+.1f 秒，在容差内"
                                  % (tgt, gap))
