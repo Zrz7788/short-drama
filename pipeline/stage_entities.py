@@ -77,6 +77,13 @@ def parse_domain_facts(path):
 
     只认 Markdown 表格行。**已确认**与**假设**分开：
     编号 `F-9x` 或置信度含"低/待验证"的算假设，默认不许用来出图。
+
+    ⚠️ **同编号重复时后者覆盖前者**（`facts[fid] = ...`）。
+    实测踩过：给档案追加"复核表"时，表里也写了 `F-22` 这样的编号。
+    那次侥幸没出事——复核表是 6 列，而本函数要求 5 列，行被跳过了。
+    **若有人补一张正好 5 列的复核表，就会静默覆盖原事实。**
+    因此：复核/引用类表格**不要以 `| F-xx |` 开头**，或保持列数不是 5。
+    （已加自检：出现重复编号且内容不同时给出提醒，见返回的 why。）
     """
     if not os.path.exists(path):
         return {}, False, "项目档案不存在：%s" % path
@@ -91,6 +98,7 @@ def parse_domain_facts(path):
     body = m.group(1)
 
     facts = {}
+    dupes = []
     for line in body.splitlines():
         line = line.strip()
         if not line.startswith("|"):
@@ -105,12 +113,19 @@ def parse_domain_facts(path):
         conf = cells[4]
         assumed = bool(ASSUMED_ID.match(fid)) or any(
             k in conf for k in ("低", "待验证")) or source in ("无", "")
-        facts[fid] = {"sentence": cells[2], "source": source,
-                      "confidence": conf, "assumed": assumed}
+        new = {"sentence": cells[2], "source": source,
+               "confidence": conf, "assumed": assumed}
+        if fid in facts and facts[fid]["sentence"] != new["sentence"]:
+            dupes.append(fid)
+        facts[fid] = new
     if not facts:
         return {}, False, ("「领域事实」章里没有可解析的表格行"
                            "（第一列要是 F-01 这样的编号）")
-    return facts, True, "%d 条" % len(facts)
+    why = "%d 条" % len(facts)
+    if dupes:
+        why += "（⚠️ 编号重复且内容不同，后者已覆盖前者：%s）" % "、".join(
+            sorted(set(dupes)))
+    return facts, True, why
 
 
 def domain_gate(con, ep, data, facts, ok, why, allow_assumed):
