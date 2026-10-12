@@ -189,6 +189,32 @@ def out_path(ep, e, view):
     return C.asset_rel(p)
 
 
+def find_existing(e, view):
+    """找**磁盘上已存在**的某个视角图，返回绝对路径或 None。
+
+    ## 为什么需要
+
+    参考链是**全身照在前、大头照以它为参考**（见 ref_for 的说明）。
+    所以在改版造型要重出全身照时，管线**没有面部参考**，脸会变。
+
+    而脸恰恰是 60 集最不能变的东西。实测有颗痣是识别锚点——
+    这种细节一旦丢了，后面每一集都要重新锚定人物。
+
+    做法：重出全身照时，把**旧的大头照**（磁盘上还在）当面部参考，
+    于是服装按新设定、脸保持原样。
+
+    ⚠️ 只找磁盘，不看数据库：数据库记录可能已被清理，
+    而文件还在（本项目的旧资产就是这种情况）。
+    """
+    safe = "".join(ch for ch in e["name"] if ch not in '\\/:*?"<>|').strip() or "entity"
+    base = os.path.join(C.assets_root(), "refs", e["kind"])
+    for ext in (".png", ".jpg", ".jpeg"):
+        p = os.path.join(base, "%s_%s%s" % (safe, view, ext))
+        if os.path.exists(p):
+            return p
+    return None
+
+
 def do_one(con, cfg, ep, e, view, prompt, reference, size, dry, rep, tag):
     rel = out_path(ep, e, view)
     if dry:
@@ -303,6 +329,9 @@ def main():
     ap.add_argument("--include-background", action="store_true",
                     help="连 background 级实体也出图（默认不出）")
     ap.add_argument("--force", action="store_true", help="已存在的视角也重新生成")
+    ap.add_argument("--keep-face", dest="keep_face", action="store_true",
+                    help="重出人物全身照时，用磁盘上旧的大头照当面部参考"
+                         "（改版造型但脸要保留时用；否则脸会变）")
     ap.add_argument("--size", default="2K", help="1K/2K/4K 或 '宽x高'（默认 2K）")
     ap.add_argument("--allow-unknown-price", action="store_true",
                     help="价目缺失时也继续（账本会失真，仅用于跑通流程）")
@@ -386,11 +415,27 @@ def main():
         依据《真人质感》：**先用 i2i 生成半身/全身图，再据它生成脸部视图**，
         能更好地控制人脸。所以全身照在前、大头照以它为参考。
         场景的俯视图以正视图为参考，保持同一空间。
+
+        `--keep-face`：重出全身照时，用磁盘上**旧的大头照**当面部参考。
+        改版造型（服装/姿态变了、脸要保留）时用这个，
+        否则重出全身照会让脸变，而脸是 60 集最不能变的东西。
         """
         if e["kind"] == "character" and view == "headshot":
             return have.get((e["id"], "fullbody"))
         if e["kind"] == "location" and view in ("scene_top", "blocking"):
             return have.get((e["id"], "scene_front"))
+        # 全身照：默认无参考（文生图）；开了 --keep-face 就挂旧大头照
+        #
+        # 用 getattr 是因为 `args` 是外层 main() 的局部名，而 ref_for 定义在
+        # 同级作用域里、靠闭包读到它。自检会以函数方式导入本模块，
+        # 那时没有 args —— getattr 让它退化为"默认关闭"，而不是抛 NameError。
+        if e["kind"] == "character" and view == "fullbody" \
+                and getattr(args, "keep_face", False):
+            old = find_existing(e, "headshot")
+            if old:
+                rep.info("面部参考（旧大头照）：%s"
+                         % os.path.relpath(old, C.assets_root())[:60])
+            return old
         return None
 
     # 已有参考图检查
