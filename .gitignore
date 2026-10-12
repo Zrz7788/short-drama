@@ -34,6 +34,9 @@ data/*.db-wal
 data/*.db-shm
 data/*.db.bak-*
 
+# ---- 私有 Clash 内核产物：含订阅节点凭据，绝不进 git ----
+.tools/clash-priv/
+
 # ---- DSH 运行时产物 ----
 *.tmp
 ~$*
