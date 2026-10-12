@@ -58,3 +58,12 @@ venv/
 
 # ---- Node ----
 node_modules/
+
+# ---- 调研/试验产物：可重新生成，不进 git ----
+.pnpm-store/
+.tools/research/
+.tools/plugin-inspect/
+.tools/agent-browser-test/
+.tools/ab-tmp/
+.tools/edge-prof/
+.tools/chrome-*/
