@@ -59,7 +59,7 @@ PIPELINE_SCRIPTS = ["pipeline/common.py", "pipeline/llm.py", "pipeline/ark.py",
                     "pipeline/stage_entities.py",
                     "pipeline/stage_storyboard.py", "pipeline/stage_prompts.py",
                     "pipeline/layout_math.py", "pipeline/layout_render.py",
-                    "pipeline/stage_layout.py",
+                    "pipeline/stage_layout.py", "pipeline/db_hygiene.py",
                     "pipeline/stage_refs.py", "pipeline/stage_firstframes.py",
                     "pipeline/stage_video.py",
                     "pipeline/selftest.py", "pipeline/selftest_llm.py",
@@ -191,13 +191,29 @@ def check_db():
     con.close()
 
 
-def run_child(script, title, timeout=900):
+def run_child(script, title, timeout=900, extra=None, allow_nonzero=False):
+    """跑一个自检子脚本。
+
+    allow_nonzero=True 时不把非零退出当失败——用于 lint 类工具：
+    它按「有阻断项」返回非零，那是**体检结果**，不是自检本身坏了。
+    此时用输出里的「阻断 N 项」判断。
+    """
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    p = subprocess.run([sys.executable, "-X", "utf8", os.path.join(ROOT, script)],
-                       cwd=ROOT, capture_output=True, text=True,
+    argv = [sys.executable, "-X", "utf8", os.path.join(ROOT, script)]
+    if extra:
+        argv += list(extra)
+    p = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=env, timeout=timeout)
     lines = [l for l in (p.stdout or "").strip().splitlines() if l.strip()]
     summary = next((l for l in reversed(lines) if "共" in l and "项" in l), "")
+    if allow_nonzero:
+        # lint 类：找「阻断 N 项」判成败；找不到就退回按退出码
+        m = re.search(r"阻断\s*(\d+)\s*项", p.stdout or "")
+        if m:
+            n_blk = int(m.group(1))
+            detail = summary or (lines[-1] if lines else "")
+            ok("管线", title, n_blk == 0, detail[:76])
+            return p
     detail = summary or (lines[-1] if lines else "")
     ok("管线", title, p.returncode == 0, detail[:76])
     return p
@@ -246,6 +262,12 @@ def check_pipeline():
     run_child("pipeline/selftest_layout.py", "布局与领域问题自检（取景量算 + 平面图 + 清单）")
     run_child("pipeline/selftest_ark.py", "第 3/4/7/8 阶段自检（假 Ark 服务/轮询/下载/记账/错误处理）")
     run_child("pipeline/selftest_e2e.py", "全链路集成（十阶段串起来，产出真 MP4）", timeout=1800)
+    # 跨文档一致性检查：剧本/视觉设定/分镜 与数据库对齐。
+    # 用 EP001 当样本自我检查（存在文档时才跑，避免新项目误报失败）。
+    _lint = os.path.join(ROOT, "tools", "lint_cross_doc.py")
+    if os.path.exists(_lint) and os.path.isdir(os.path.join(ROOT, "剧集", "EP001")):
+        run_child("tools/lint_cross_doc.py", "跨文档一致性（剧本/视觉设定/分镜 ↔ 数据库）",
+                  extra=["--episode-id", "1"], allow_nonzero=True)
 
 
 def check_selftest():

@@ -68,6 +68,44 @@ def null_orphan_cost_refs(con, verbose=False):
     return total
 
 
+def purge_stale_scripts(con, episode_id, verbose=False):
+    r"""删掉某集除现行稿以外的剧本，**连同它们的场次**。返回 (剧本数, 场次数)。
+
+    ## 为什么需要
+
+    踩过两次「删数据没删干净」，根因相同：**删父行时没清依赖它的行**。
+
+    1. 删旧镜头时没清 `cost_ledger` → 外键悬挂（见 `null_orphan_cost_refs`）
+    2. 删旧剧本时漏了 `scene` → 库里**两版场次并存**，
+       `select sum(duration_s) from scene` 得 160 秒（正确 80）。
+       任何**按 episode 聚合、没按 script_id 过滤**的代码都会算错。
+
+    因此凡是要"换掉剧本"，就用这个函数，别只改 `is_current`。
+
+    ⚠️ 不删 `cost_ledger`——账要留；只删可重新生成的剧本与场次。
+    """
+    old = list(con.execute(
+        "SELECT id, version FROM script WHERE episode_id = ? "
+        "AND (is_current IS NULL OR is_current = 0)", (episode_id,)))
+    n_scene = 0
+    for r in old:
+        # 先清场次上的引用（镜头若还在，它会指向将被删的场次）
+        try:
+            con.execute(
+                "UPDATE shot SET scene_id = NULL WHERE scene_id IN "
+                "(SELECT id FROM scene WHERE script_id = ?)", (r["id"],))
+        except sqlite3.Error:
+            pass
+        cur = con.execute("DELETE FROM scene WHERE script_id = ?", (r["id"],))
+        n_scene += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        con.execute("DELETE FROM script WHERE id = ?", (r["id"],))
+        if verbose:
+            print("    删 v%s（script_id=%s）" % (r["version"], r["id"]))
+    # 顺手清悬挂的花费指针
+    null_orphan_cost_refs(con, verbose=verbose)
+    return len(old), n_scene
+
+
 def find_orphans(con):
     r"""列出全部外键悬挂（体检用）。返回 [(表.列 -> 父表, 值, 条数)]。"""
     fks = [
