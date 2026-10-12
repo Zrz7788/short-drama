@@ -102,6 +102,12 @@ c.execute("delete from shot")
 print("  ✗ 删除 %d 个镜头（含 %d 条提示词、%d 张关键帧记录）" % (n_shot, n_prompt, n_kf))
 print("    磁盘上的图没删，只是库里不再引用")
 
+# ⚠️ 必须紧接着清掉 cost_ledger 里指向已删镜头的指针，否则外键悬挂。
+#    （实测踩过：漏了这步，验收的「外键完整性」失败。花费记录要保留——那是账。）
+from pipeline import db_hygiene as H  # noqa: E402
+n_fk = H.null_orphan_cost_refs(c, verbose=True)
+print("  清掉 %d 条悬挂的花费指针（钱保留，只是不再指向已删镜头）" % n_fk)
+
 c.commit()
 
 print("\n" + "=" * 72)
