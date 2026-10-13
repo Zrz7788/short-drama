@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-r"""发布前合规检查：AI 短剧的备案与题材审核。
+r"""发布前合规检查：AI 短剧的备案、题材审核与词级违禁词扫描。
 
 ## 为什么是独立一关（而不是塞进别的检查里）
 
@@ -17,7 +17,9 @@ r"""发布前合规检查：AI 短剧的备案与题材审核。
 它**不替你备案**（那要人去官方渠道办）。它做的是：
   1. **在发布前强制提醒**这件事还没做，并给出**要填什么**
   2. 扫剧本与档案里的**高风险题材信号**，提示需要三级审核
-  3. 产出一份**待办清单**，存进项目档案旁，便于交接
+  3. **词级违禁词扫描**（依《合规词表与台词时长约束.md》四类词典，
+     对分镜/视频提示词与剧本正文逐词扫描，命中给出中性词替换方向）
+  4. 产出一份**待办清单**，存进项目档案旁，便于交接
 
 ## 诚实边界
 
@@ -25,6 +27,9 @@ r"""发布前合规检查：AI 短剧的备案与题材审核。
 知识库记的只有"须先备案后上线 + 题材三级审核"这一句。
 所以本工具**不编造流程**，只把它列成必须人工确认的项，
 并明确标出"这条依据的是二手资料、需向官方核实"。
+
+词表同样来自二手资料（桌面技法教程，2026-10 收录），
+词级命中是"生成物需要改写"的信号，不是"剧本不能拍"的结论。
 """
 import argparse
 import json
@@ -35,6 +40,10 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 PROJECT = "殡仪馆的阿九"
+
+# 词级违禁词表的知识库出处（数据源，词条改动去那里改）
+WORDLIST_MD = os.path.join("knowledge", "02-模型与成本",
+                           "合规词表与台词时长约束.md")
 
 # 高风险题材信号：命中即提示需要三级审核／可能不可拍
 RISK = {
@@ -51,6 +60,98 @@ RISK = {
     "未成年": ("未成年", "童工", "学生", "校园"),
     "真实性争议": ("真实事件", "真人真事", "改编自", "原型", "实名"),
 }
+
+# 词级违禁词词典：从知识库《合规词表与台词时长约束.md》§一装载。
+# 为什么放知识库不放代码：词表是**内容数据**，会随平台规则更新；
+# 代码里只写装载与匹配逻辑，词的增删改不碰代码。
+# 装载失败不阻断本工具（题材/备案检查照跑），只报告词级检查不可用。
+WORDLIST = None
+WORDLIST_ERROR = None
+
+
+def load_wordlist():
+    """从知识库词表 md 解析四类违禁词条。
+
+    词表格式（§一 各表）：| 子类 | 词条 |
+    词条格为顿号/逗号连排；括号内限定语（如"袒胸露背（过度）"）
+    取核心词匹配——限定语是给人看的判断边界，匹配按核心词。
+    """
+    global WORDLIST, WORDLIST_ERROR
+    if WORDLIST is not None:
+        return WORDLIST
+    WORDLIST = {}
+    try:
+        body = open(WORDLIST_MD, encoding="utf-8").read()
+    except OSError as e:
+        WORDLIST_ERROR = "词表文件读不到：%s" % e
+        return WORDLIST
+    # 定位 §一（违禁词替换表）到 §二 之间
+    m = re.search(r"^##\s*一、违禁词替换表.*?$(.*?)^##\s*二、", body,
+                  re.M | re.S)
+    if not m:
+        WORDLIST_ERROR = "词表 md 里找不到「## 一、违禁词替换表」章节"
+        return WORDLIST
+    section = m.group(1)
+    # 按小节（### 1. 血腥暴力类…）分组
+    for sec in re.split(r"^###\s+", section, flags=re.M):
+        if not sec.strip():
+            continue
+        title = sec.splitlines()[0].strip()
+        cat = re.sub(r"[（(].*?$", "", title).strip("—- ").strip()
+        words = set()
+        for row in re.findall(r"^\|\s*[^|]+\s*\|\s*([^|]+)\|\s*$",
+                              sec, re.M):
+            # 表分隔行（| --- | --- |）不是词条
+            if set(row.strip()) <= set("-— "):
+                continue
+            # 词条格：顿号/逗号连排
+            for w in re.split(r"[、，,]", row):
+                w = w.strip()
+                # 去掉括号限定语与"（及同类：…）"式注释尾巴（含引号内的）
+                w = re.sub(r"[（(][^）)]*[）)]", "", w).strip()
+                w = re.sub(r"^(及同类[:：]|含)", "", w).strip()
+                # 去掉残留引号与空白
+                w = w.strip("“”\"' 　")
+                # 表头行与残句过滤：词条必须是 2-8 字的纯词
+                if not re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9]{2,8}", w):
+                    continue
+                words.add(w)
+        if words:
+            WORDLIST[cat] = sorted(words)
+    if not WORDLIST:
+        WORDLIST_ERROR = "词表 md 解析出 0 条词条（格式可能变了）"
+    return WORDLIST
+
+
+def scan_banned_words():
+    """对剧本/分镜/视觉设定正文做词级违禁词扫描。
+
+    返回 {类别: {文件: [命中的词]}}。只扫正文 md，
+    词表自身的 md 与 .bak 备份不在扫描范围（它们天然命中）。
+    """
+    wordlist = load_wordlist()
+    if not wordlist:
+        return None
+    hits = {}
+    targets = []
+    for root, dirs, fs in os.walk("剧集"):
+        dirs[:] = [d for d in dirs if d != ".git"]
+        for f in fs:
+            if f.endswith(".md"):
+                targets.append(os.path.join(root, f))
+    for t in targets:
+        try:
+            body = open(t, encoding="utf-8").read()
+        except OSError:
+            continue
+        # 只扫正文：剔掉 [连续性] 等生产标签行，避免拿声明比对声明
+        body = re.sub(r"^\[[^\]]+\]\s*[^\n]*$", "", body, flags=re.M)
+        for cat, words in wordlist.items():
+            got = sorted(w for w in words if w in body)
+            if got:
+                hits.setdefault(cat, {})[t] = got
+    return hits
+
 
 # 发布前必须人工确认的项（**不编造流程，只列待确认**）
 CHECKLIST = [
@@ -99,6 +200,7 @@ def main():
     args = ap.parse_args()
 
     risks = scan_risks()
+    banned = scan_banned_words()
 
     print("=" * 74)
     print("发布前合规检查 · %s" % PROJECT)
@@ -122,6 +224,25 @@ def main():
                 print("     %-44s %s" % (f[:44], "、".join(words[:6])))
     print()
 
+    print("【词级违禁词扫描 —— 命中项须改写后再进生成】")
+    print()
+    if banned is None:
+        print("  -- 词级检查不可用：%s" % (WORDLIST_ERROR or "未知原因"))
+        print("     （词表：%s）" % WORDLIST_MD)
+    elif not banned:
+        print("  ✅ 分镜/视觉设定正文未命中违禁词（词表 %d 类）"
+              % len(load_wordlist()))
+    else:
+        for cat, files in sorted(banned.items()):
+            print("  ✗ %s" % cat)
+            for f, words in sorted(files.items()):
+                print("     %-44s %s" % (f[:44], "、".join(words[:8])))
+        print()
+        print("     改写方向：词级替换用中性词（如「嘴角流血」→「紧咬下唇，")
+        print("     衣领有红痕」）；情节级改写用视觉隐喻（见《漫剧提示词")
+        print("     工具箱》§四：暴力→投影/惊鸟，血腥→打翻的红酒，色情→留白）。")
+    print()
+
     print("【本项目实际情况（供判断，不是结论）】")
     print("  · 题材：殡仪馆遗体整容师 + 悬疑。殡葬与遗体是**明确命中**的敏感面，")
     print("    应当准备题材说明。")
@@ -138,7 +259,10 @@ def main():
     if args.json:
         print(json.dumps({"checklist": CHECKLIST,
                           "risk_hits": {k: {f: w for f, w in v.items()}
-                                        for k, v in risks.items()}},
+                                        for k, v in risks.items()},
+                          "banned_hits": (None if banned is None
+                                          else {k: {f: w for f, w in v.items()}
+                                                for k, v in banned.items()})},
                          ensure_ascii=False, indent=2))
     # 出品前必须人工确认 —— 因此恒以非零退出，提示"还有未确认项"
     return 1
