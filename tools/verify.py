@@ -280,6 +280,14 @@ def check_pipeline():
     if os.path.exists(_ct) and _has2:
         run_child("tools/continuity.py", "跨集连续性（上一集的线，本集接没接）",
                   extra=["--from", "1", "--to", "2"], allow_nonzero=True)
+    # 图片提示词审查：**出图之前**查漏。
+    # 依据今天真实亏掉的五处（塑形器画成刀片/嘴唇画成嘟嘴/手术帽没戴/
+    # 工牌位空着/三间房不像一栋楼），这些全都能在出图前审出来、不花钱。
+    _pr = os.path.join(ROOT, "tools", "prompt_review.py")
+    if os.path.exists(_pr) and os.path.exists(
+            os.path.join(ROOT, "剧集", "EP001", "视觉设定.md")):
+        run_child("tools/prompt_review.py", "图片提示词审查（出图前查漏）",
+                  extra=["--episode-id", "1"], allow_nonzero=True)
 
 
 def check_selftest():
