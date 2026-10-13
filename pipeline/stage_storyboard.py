@@ -294,8 +294,8 @@ def persist(con, ep, shots, by_seq, ent_by_name, dry):
             " camera_emotion, movement_speed, camera_lock, camera_angle, lens_mm,"
             " composition, dof,"
             " screen_direction, count_lock, stillness_lock, positive_locks,"
-            " on_screen_text,"
-            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
+            " on_screen_text, transition, entrance,"
+            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
             (ep["id"], by_seq[s["scene_seq"]], s["seq"], float(s["duration_s"]),
              s["shot_size"], s["camera_move"], s["description"], s["action"],
              s["lighting"], s.get("dialogue") or "", s.get("sfx") or "",
@@ -305,6 +305,7 @@ def persist(con, ep, shots, by_seq, ent_by_name, dry):
              s.get("screen_direction") or "", s.get("count_lock") or "",
              s.get("stillness_lock") or "", s.get("positive_locks") or "",
              s.get("on_screen_text") or "",
+             s.get("transition") or "", s.get("entrance") or "",
              int(s["draws_planned"]))).lastrowid
         for e in s["entities"]:
             con.execute("INSERT OR IGNORE INTO shot_entity (shot_id, entity_id, role) "
@@ -369,8 +370,13 @@ def main():
             L.validate(obj, SPEC, "分镜")
             rep.info("来源：%s（跳过模型调用）" % args.from_json)
         else:
+            # 分镜输出很长（13 镜 × 转场/出场/五锁，每镜约 500 字），
+            # 默认 8192 max_tokens 不够，会**安静地截断**——JSON 解析报
+            # "无法解析"，看起来像偶发，实际每次都断在同一处。
+            # 16384 给足余量；模型按实消耗计费，设大不等于多用。
             obj = L.chat_json([{"role": "user", "content": prompt}], SPEC, "分镜",
-                              base_url=args.base_url, model=args.model)
+                              base_url=args.base_url, model=args.model,
+                              max_tokens=16384)
             rep.info("来源：模型调用")
         by_seq, ent_by_name, stat, warns = check_shots(
             con, ep, obj["shots"], scenes, entities)
