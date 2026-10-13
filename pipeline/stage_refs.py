@@ -85,7 +85,54 @@ BLOCKING = ("blocking", "站位图",
             "在场景图上用**半透明白膜人偶**标出人物站位，"
             "每个人偶旁标注编号与角色名，用**明显不同的颜色**区分人偶，"
             "人偶为纯白无贴图模型（不显示五官与服装细节）。"
-            "此图仅作站位参考。")
+            "此图仅作站位参考。"
+            "**最终画面里不得出现任何线框、编号与文字标记。**")
+
+# ---------------------------------------------------------------- 子空间
+#
+# 依据《8、场景穿越》：「**先生成发生具体剧情的子空间，再通过子空间扩图到
+# 大场景**」。原文正确顺序是**从小到大**，不是先画大场景——
+# 因为**模型的空间推理能力有限**（原文实测：「SD 很难通过异常场景图，
+# 精准识别到远处的拱门」「SD 很难通过内外两张图，做好空间衔接」）。
+#
+# 原表里这条被列为"应改"，但一直没落地；今天用户指出三间房各长各的，
+# 正是同一个根因。
+#
+# 为什么把**最终构图**放进去：扩图指令照原文写的是
+# 「将参考图放在中间黄金分割点，向四周扩图…**保持参考图中间的包间不变**」——
+# "中间不变"要求子空间在画面中央，否则扩完会被裁掉或偏移。
+# 所以我们不是给一块孤立特写，而是**给一个已经按最终构图摆好的小空间**。
+SCENE_SUBSPACE = ("scene_subspace", "子空间",
+                  "剧情真正发生的那一小块空间，**画面中央**，"
+                  "四周留出可向外扩展的余量；构图为**最终镜头的取景**"
+                  "（该场景出现在哪些镜头里，就按那些镜头的视角来定）；"
+                  "无人物，自然光照，材质与色彩写实；"
+                  "**画面分前景与后景两层**——前景放贴近镜头的一两件具体物体"
+                  "（占据画面下缘约三成），后景交代通道或墙面走向，"
+                  "使空间有纵深、不像一张平片。")
+
+# 同场景的**不同时段光影版本**（依《6、女频氛围感》）。
+# 依据：同一场景只做一个时段，运镜一换时段光影就接不上；
+# 而"避免日夜混光"也是同一条的下半句——**同一条里不能日夜混着来**。
+#
+# ⚠️ 本项目第 1 集是**同一场秋晨**，所以只出 time_dawn 一版；
+#    这个常量是为后面跨越时段的集准备的（登记即为落地）。
+SCENE_LIGHT_VARIANTS = ("time_dawn", "time_dusk")
+SCENE_LIGHT_DESC = {
+    "time_dawn": "清晨冷调自然光，色温偏低、略偏青，光线从上方偏侧进入，"
+                 "阴影柔和、方向一致，整体明亮但不刺眼。",
+    "time_dusk": "黄昏暖调自然光，色温偏高、偏橙，光线低角度斜射，"
+                 "阴影拉长，明暗对比强于清晨，整体偏暖。",
+}
+
+# 扩图说明（i2i）。**是否启用由实体自己的开关决定**：
+# 只有当子空间画面里**能看到房间结构**（墙面/门/顶/地）时才扩得动；
+# 画面里本来就没有的东西，模型变不出来。
+SCENE_EXPAND_DESC = (
+    "以参考图为**画面中央的主体**保持不变，向四周扩图，"
+    "展示该空间的完整环境；保持参考图里已有的材质、色调、光源方向与"
+    "空间结构完全不变，只向外补全墙、门、天花、地面与周边陈设。"
+    "**画面分前景、中景、后景三层**，前景留具体物体、后景交代空间纵深。")
 
 # 人物素材：main 出两张，secondary 只出全身照（不会有面部大特写）
 CHARACTER_VIEWS = {
@@ -93,10 +140,10 @@ CHARACTER_VIEWS = {
     "secondary": [FULLBODY],
     "background": [],
 }
-# 场景素材：核心场景出三张，一次性场景只出正视图
+# 场景素材：核心场景出四张（含子空间），一次性场景出三张
 SCENE_VIEWS = {
-    "main": [SCENE_FRONT, BLOCKING, SCENE_TOP],
-    "secondary": [SCENE_FRONT, BLOCKING],
+    "main": [SCENE_SUBSPACE, SCENE_FRONT, BLOCKING, SCENE_TOP],
+    "secondary": [SCENE_SUBSPACE, SCENE_FRONT, BLOCKING],
     "background": [],
 }
 
@@ -107,8 +154,8 @@ PROP_VIEW = ("prop_ref", "道具参考图",
 
 # 每个实体类型的**主参考图**（标记 is_primary=1）。
 # 选"第一个生成的那张"：人物是全身照（大头照以它为参考），
-# 场景是正视图（俯视图以它为参考），道具只有一张。
-PRIMARY_VIEW = {"character": "fullbody", "location": "scene_front",
+# **场景是子空间**（正视图以扩图方式从它来），道具只有一张。
+PRIMARY_VIEW = {"character": "fullbody", "location": "scene_subspace",
                 "prop": "prop_ref"}
 
 # 各阶段给哪些 tier 出图
@@ -162,17 +209,26 @@ def verify_refs(con):
     return False, "；".join(parts)
 
 
-def build_view_prompt(e, view_name, view_desc):
+def build_view_prompt(e, view_name, view_desc, reference=None):
     """按素材类型组装提示词。
 
     人物用 portrait.md 模板（含"真人质感"混搭与妆造部件级描述），
     场景/道具复用同一模板但换掉视角说明——它们的差别主要在视角描述上。
+
+    **扩图**：正视图若挂了子空间当参考，视角说明换成扩图指令。
+    依《8、场景穿越》原文写法：
+    「将参考图放在中间黄金分割点，向四周扩图…**保持参考图中间的包间不变**」。
+    关键是那句"保持不变"——不写的话，模型会**重画整个画面**，
+    子空间就白做了。
     """
+    desc = view_desc
+    if view_name == "scene_front" and reference:
+        desc = SCENE_EXPAND_DESC
     return L.load_prompt(
         TPL,
         entity_block=entity_block(e),
         view_name=view_name,
-        view_desc=view_desc,
+        view_desc=desc,
     )
 
 
@@ -422,8 +478,15 @@ def main():
         """
         if e["kind"] == "character" and view == "headshot":
             return have.get((e["id"], "fullbody"))
-        if e["kind"] == "location" and view in ("scene_top", "blocking"):
-            return have.get((e["id"], "scene_front"))
+        # 场景的参考链（依《8、场景穿越》"子空间先行，再扩图"）：
+        #   子空间   -> 无参考（文生图，最小单位）
+        #   正视图   -> **以子空间为参考做扩图**（"保持参考图中间不变"）
+        #   俯视/站位 -> 以正视图为参考（保持同一空间）
+        if e["kind"] == "location":
+            if view in ("scene_top", "blocking"):
+                return have.get((e["id"], "scene_front"))
+            if view == "scene_front":
+                return have.get((e["id"], "scene_subspace"))
         # 全身照：默认无参考（文生图）；开了 --keep-face 就挂旧大头照
         #
         # 用 getattr 是因为 `args` 是外层 main() 的局部名，而 ref_for 定义在
@@ -445,10 +508,15 @@ def main():
 
     price = image_unit_price(con, cfg["image_model"])
     planned = 0
-    # 全身照排在大头照之前——大头照要以它为参考图（见 ref_for 的说明）
+    # 生成顺序**由参考链决定**：被参考的先生成。
+    #   人物：全身照 -> 大头照
+    #   场景：子空间 -> 正视图（扩图）-> 俯视图 / 站位图
+    ORDER = {"fullbody": 0, "headshot": 1,
+             "scene_subspace": 0, "scene_front": 1,
+             "scene_top": 2, "blocking": 2, "prop_ref": 0}
+
     def ordered(e):
-        vs = views_for(e)
-        return sorted(vs, key=lambda v: 0 if v[0] != "headshot" else 1)
+        return sorted(views_for(e), key=lambda v: ORDER.get(v[0], 9))
 
     for e in ents:
         for v, _n, _d in ordered(e):
@@ -493,8 +561,11 @@ def main():
                 rep.info("跳过 %s 的大头照：没有全身照可作参考（先跑同一阶段，"
                          "全身照会先出）" % e["name"])
                 continue
+            if v == "scene_front" and ref:
+                rep.info("扩图：%s 的正视图以子空间为参考（保持中间不变）"
+                         % e["name"])
             got = do_one(con, cfg, ep, e, v,
-                         build_view_prompt(e, vn, vd),
+                         build_view_prompt(e, vn, vd, ref),
                          ref, args.size, args.dry_run, rep,
                          "%s·%s" % (e["name"], vn))
             ok &= bool(got)

@@ -67,6 +67,21 @@ ARCH_ELEMENTS = {
     "光色": ("冷白", "暖白", "色温", "光色", "昏暗", "明亮"),
 }
 
+# ---------------------------------------------------------------- 日夜混光
+#
+# 依《6、女频氛围感》：**避免日夜混光——混光会让光影处理失效**。
+# 意思是：同一个场景里不能一部分是日光、一部分是夜光；
+# 也不能同时写"白天"与"夜里"的时间词。
+DAY_WORDS = ("白天", "日间", "正午", "上午", "下午", "晨", "早晨", "清晨",
+             "秋晨", "阳光", "日光", "窗外亮", "天亮")
+NIGHT_WORDS = ("夜里", "夜晚", "深夜", "半夜", "凌晨", "天黑", "月光",
+               "夜色", "夜间", "路灯")
+# 人工光：夜里靠它照明，白天不该成为主光
+ARTIFICIAL = ("顶灯", "无影灯", "荧光灯", "射灯", "台灯", "白炽", "筒灯")
+# 冷/暖：同一镜里两套色温会互相打架
+COOL = ("冷白", "青", "冷调", "蓝调", "偏冷", "冷色")
+WARM = ("暖白", "暖调", "橙", "偏暖", "暖色", "金黄")
+
 
 def parse_visual_spec(path):
     """从《视觉设定.md》抽每个实体的小节，返回 {名字: 正文}。"""
@@ -216,12 +231,44 @@ def check_entity(e, facts, spec):
     if e["kind"] in ("prop", "location"):
         LABEL_CARRIERS = ("工牌", "证件", "招牌", "标签", "吊牌", "铭牌",
                           "印刷物", "文件", "证书", "证明")
+        # ⚠️ 例外：**识别性铭牌与剧本标了 [画面文字] 的内容**，
+        #    它们的文字是剧情内容、必须保留，不算"该空白"。
+        #    踩过：我把黄铜签牌改成"纯色空白"——而签牌刻字是它的识别功能，
+        #    剧本还写了「抽下签牌看了一眼」。
+        IDENTIFYING = ("签牌", "脚签", "脚趾牌", "死亡确认书", "死亡证明",
+                       "画面文字", "工号牌", "编号牌")
+        if any(k in name for k in IDENTIFYING) or any(
+                k in blob for k in IDENTIFYING):
+            return blocks, warns, notes
         for kw in LABEL_CARRIERS:
             if kw in blob and not any(w in blob for w in
                                       ("空白", "无字", "无印刷", "无标识", "纯色")):
                 warns.append("%s 提到「%s」但没写「表面为纯色空白/无字」——"
                              "不指定就会被模型自己填上内容"
                              "（踩过：填上了真实商标）。" % (tag, kw))
+
+    # C8 日夜混光（依《6、女频氛围感》：混光会让光影处理失效）
+    if e["kind"] == "location":
+        day = [w for w in DAY_WORDS if w in blob]
+        night = [w for w in NIGHT_WORDS if w in blob]
+        if day and night:
+            blocks.append("%s 同时出现白天词（%s）与夜里词（%s）——"
+                          "**日夜混光会让光影处理失效**，后续每镜的补光都対不上。"
+                          "同一场景只能定一个时段。"
+                          % (tag, "、".join(day[:3]), "、".join(night[:3])))
+        cool = [w for w in COOL if w in blob]
+        warm = [w for w in WARM if w in blob]
+        # 只要**写明谁主谁辅**，冷+暖就是正当搭配（顶灯冷白 + 镜前灯暖白），
+        # 不再报。踩过：整容室写的是「主光源为冷白色无影灯，辅助光源为
+        # 镜前暖白光」——本来就分清了主次，规则却仍在报。
+        named_roles = any(k in blob for k in
+                          ("主光", "主光源", "辅光", "辅助光", "主光源为",
+                           "primary light", "key light"))
+        if cool and warm and not named_roles:
+            warns.append("%s 同时写了冷调（%s）与暖调（%s）——"
+                         "同一镜里两套色温会互相打架。若真的是「主光+辅光」"
+                         "的搭配，请写明**哪个是主、哪个是辅**。"
+                         % (tag, "、".join(cool[:3]), "、".join(warm[:3])))
     return blocks, warns, notes
 
 
