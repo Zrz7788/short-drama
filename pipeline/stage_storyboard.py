@@ -80,6 +80,13 @@ SPEC = {
         "stillness_lock": L.OPTIONAL_STR,
         "positive_locks": L.OPTIONAL_STR,
         "on_screen_text": L.OPTIONAL_STR,   # 只有承载精确文字的那一镜才非空
+        # 转场设计（依外部教程：每个提示词结尾给一句契合画面的转场，
+        # 管 80 秒成片的镜头衔接）。OPTIONAL：不填则提示词不占位，不编造。
+        "transition": L.OPTIONAL_STR,
+        # 人物出场设计（《11、人物出场8技巧》之一：动态闯入/光影渐显/
+        # 他人视线/前景遮挡/道具引入/先声后人/运镜移焦/局部先入）。
+        # 防"人物直接站在镜头里"的平淡开场。
+        "entrance": L.OPTIONAL_STR,
         "entities": [{"name": str, "role": str}],
         "strategy": str,
         "draws_planned": int,

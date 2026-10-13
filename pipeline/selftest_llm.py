@@ -158,6 +158,11 @@ def build_storyboard():
             "positive_locks": "化验单的褶皱位置不变、走廊日光灯保持同一色温、两人的相对站位不变",
             # 精确文字只归属到唯一一镜：只有第 4 镜读化验单上的日期
             "on_screen_text": "化验单日期：11月6日" if i == 4 else "",
+            # 转场设计：除最后一镜外每镜必填（最后一镜留钩子给第 2 集）
+            "transition": ("动作衔接：她攥紧化验单的手缓缓松开" if i < len(SHOT_PLAN)
+                           else ""),
+            # 出场设计：角色首次登场的第一镜用"道具引入"
+            "entrance": ("道具引入：先给化验单特写，纸角翘起" if i == 1 else ""),
             "entities": listing,
             "strategy": strat,
             "draws_planned": draws,
