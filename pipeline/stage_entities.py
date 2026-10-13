@@ -213,6 +213,20 @@ def facts_digest(facts):
     return "\n".join(out)
 
 
+def parse_arch_spec(path):
+    """解析项目档案里的「## 建筑设定」章，返回正文；没有则返回空串。
+
+    为什么要有它：三个房间各写各的描述时，门/天花/灯具/墙面各编各的，
+    用户看出"三间房不像一栋楼"。正解是把公共元素一次定死、照抄不许重编。
+    """
+    if not os.path.exists(path):
+        return ""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"^##\s*建筑设定\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
 def build_prompt(con, ep, facts):
     row = con.execute(
         "SELECT id, content, version FROM script "
@@ -226,9 +240,11 @@ def build_prompt(con, ep, facts):
         "- 第%d场 %s【%s】%s%s" % (s["seq"], s["slug"], s["beat"], s["action"],
                                  ("  台词：" + s["dialogue"]) if s["dialogue"] else "")
         for s in scenes)
+    arch = parse_arch_spec(os.path.join(PROJECT_DIR, "%s.md" % ep["project"]))
     return L.load_prompt(PROMPT, script_content=row["content"],
                          scenes_digest=digest,
-                         domain_facts=facts_digest(facts))
+                         domain_facts=facts_digest(facts),
+                         arch_spec=arch)
 
 
 def persist(con, ep, data, dry):
