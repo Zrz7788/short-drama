@@ -19,6 +19,16 @@ import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
 
+# 纯"登记"项：设计上就不进代码（本集用不上或属商务/人工事项）。
+# ⚠️ 必须与"代码落地"分开报，否则会虚报进度。踩过：
+#    「灰膜动作复刻」「预算优先砸光影」两项只在知识库里，
+#    审计却报"24/24 全绿"。
+REGISTER_ONLY = {
+    "灰膜动作复刻": ("knowledge/01-制作方法/实战技法合集.md", "本集无复杂动作镜头"),
+    "预算优先砸光影与画面层次": ("knowledge/02-模型与成本/单集成本模型.md",
+                                "成本纪律，非代码"),
+}
+
 # (改动项, 判据关键词列表——任一命中算落地, 说明)
 ITEMS = [
     ("人物出场设计（8 种）", ["出场", "entrance"], "分镜要求里加入场设计"),
@@ -73,8 +83,14 @@ print("扫描代码文件 %d 个，共 %d KB\n" % (len(SRC), len(BLANK) // 1024)
 print("=" * 74)
 print("落地盘点（只认代码，不认文档）")
 print("=" * 74)
-done, todo = [], []
+done, todo, reg = [], [], []
 for name, kws, note in ITEMS:
+    if name in REGISTER_ONLY:
+        path, why = REGISTER_ONLY[name]
+        exists = os.path.exists(path)
+        reg.append((name, path, why, exists))
+        print("  ▣ %-30s 登记（%s）%s" % (name, why, "" if exists else " ⚠️文件缺失"))
+        continue
     hit = [k for k in kws if k in BLANK]
     if hit:
         done.append((name, note, hit))
@@ -90,4 +106,5 @@ print("=" * 74)
 for name, note in todo:
     print("  · %-30s %s" % (name, note))
 print()
-print("  落地 %d 项，欠账 %d 项" % (len(done), len(todo)))
+print("  代码落地 %d 项，登记 %d 项，欠账 %d 项"
+      % (len(done), len(reg), len(todo)))

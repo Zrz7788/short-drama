@@ -272,6 +272,102 @@ def check_entity(e, facts, spec):
     return blocks, warns, notes
 
 
+
+# ---------------------------------------------------------------- 同性别配色
+#
+# 依《4、导演台站位法》：**同性别角色的服装颜色必须明显区分**。
+# 依据是实测：两个同性别角色穿相近色时，模型会把他们的服装**互相串**。
+#
+# 实体表没有性别字段，所以从描述里的"男性/女性"判。
+COSTUME_COLORS = ("藏青", "深灰", "浅灰", "深蓝", "藏蓝", "黑", "白", "米白",
+                  "卡其", "棕", "褐", "墨绿", "酒红", "藏青", "灰")
+
+
+def _gender(desc):
+    d = desc or ""
+    if "女性" in d or "女" in d[:14]:
+        return "女"
+    if "男性" in d or "男" in d[:14]:
+        return "男"
+    return "?"
+
+
+def _costume_segment(desc):
+    r"""切出描述里的**服装段**，避免把发色/肤色当成服装色。
+
+    描述形态通常是：
+        …黑色头发…深棕色眼睛，皮肤偏冷白…；**上身穿X，下身穿Y，脚穿Z**
+    所以从"上身穿/外穿/内搭/下身穿/脚穿"这些标记起算到句末。
+    """
+    d = desc or ""
+    m = re.search(r"(上身穿|上装|外穿|内搭|下身穿|下装|脚穿|穿)", d)
+    return d[m.start():] if m else d
+
+
+def _costume_colors(desc):
+    """取**服装段**里的颜色词（长词优先，避免"深灰"与"灰"重复计）。
+
+    ⚠️ 只在服装段里取。踩过：同一条描述里既有"深灰西装"也有
+    "黑色头发""深棕色眼睛"——后两者不是服装色，混进来会让
+    "颜色重合"的判定失真。
+    """
+    d = _costume_segment(desc)
+    hits = {c for c in COSTUME_COLORS if c in d}
+    out = set()
+    for c in sorted(hits, key=len, reverse=True):
+        if not any(c != o and c in o for o in out):
+            out.add(c)
+    return out
+
+
+def check_costume_colors(ents, scenes=None):
+    r"""同性别角色共享多个服装颜色词 -> 提醒。
+
+    ## 限制：**只在同场出现过的人物之间报**
+
+    踩过：报了「主管 vs 盛伯渊」共享 棕/白/藏青/黑——但**他们从没同场过**
+    （盛伯渊在整容室与推车上，主管在后廊），颜色撞不撞无所谓。
+    不同场就不可能被模型串色。
+    """
+    warns = []
+    chars = [e for e in ents if e["kind"] == "character"]
+    for i in range(len(chars)):
+        for j in range(i + 1, len(chars)):
+            a, b = chars[i], chars[j]
+            if _gender(a["description"]) != _gender(b["description"]):
+                continue
+            if _gender(a["description"]) == "?":
+                continue
+            if scenes is not None and not (scenes.get(a["name"], set())
+                                           & scenes.get(b["name"], set())):
+                continue
+            shared = _costume_colors(a["description"]) & \
+                _costume_colors(b["description"])
+            if len(shared) >= 2:
+                warns.append(
+                    "同性别角色「%s」与「%s」**同场出现**且服装颜色重合（共享 %s）"
+                    "——同性别角色的服装颜色必须明显区分，"
+                    "否则模型会把两人的服装互相串。建议其中一位换色系。"
+                    % (a["name"], b["name"], "、".join(sorted(shared))))
+    return warns
+
+
+def character_scenes():
+    r"""从剧本正文统计每个人物出现在哪些场——用于"只在同场时报"的限制。"""
+    import glob
+    out = {}
+    for p in sorted(glob.glob(os.path.join(ROOT, "剧集", "EP*", "剧本.md"))):
+        t = open(p, encoding="utf-8").read()
+        scenes = re.split(r"^##\s+(\S+)", t, flags=re.M)
+        # scenes = [前言, 场景ID, 正文, 场景ID, 正文, ...]
+        for k in range(1, len(scenes) - 1, 2):
+            sid, body = scenes[k], scenes[k + 1]
+            for m in re.finditer(r"([\u4e00-\u9fff]{2,4})(?=[：:（(]|说|道|问|答)",
+                                 body):
+                out.setdefault(m.group(1), set()).add(sid)
+    return out
+
+
 def check_arch_consistency(ents):
     r"""跨房间比对建筑公共元素——**只在"别的房间写了、这间没写"时报**。
 
@@ -337,6 +433,7 @@ def main():
         notes += n
     # 跨房间建筑一致性（单独一步：它要同时看所有 location）
     warns += check_arch_consistency([dict(e) for e in ents])
+    warns += check_costume_colors([dict(e) for e in ents], character_scenes())
 
     if args.json:
         print(json.dumps({"blocks": blocks, "warns": warns, "notes": notes},

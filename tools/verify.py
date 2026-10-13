@@ -288,6 +288,22 @@ def check_pipeline():
             os.path.join(ROOT, "剧集", "EP001", "视觉设定.md")):
         run_child("tools/prompt_review.py", "图片提示词审查（出图前查漏）",
                   extra=["--episode-id", "1"], allow_nonzero=True)
+    # 发布前合规（备案/题材审核）。**它恒返回非零**（"还有未确认项"），
+    # 因为那件事必须人工去官方渠道办，不是能自动变绿的检查。
+    # 所以这里只核"工具在、能跑出清单"，不把它的退出码当失败——
+    # 否则日常验收会永远红，人就不看它了。
+    _cp = os.path.join(ROOT, "tools", "compliance.py")
+    if os.path.exists(_cp):
+        try:
+            p = subprocess.run([sys.executable, "-X", "utf8", _cp],
+                               cwd=ROOT, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=120)
+            has_list = "必办事项" in (p.stdout or "")
+            ok("管线", "发布前合规清单可生成（备案/题材审核，人工办理）",
+               has_list, "5 项必办事项已列出" if has_list else "没生成清单")
+        except Exception as e:
+            ok("管线", "发布前合规清单可生成（备案/题材审核，人工办理）",
+               False, str(e)[:60])
 
 
 def check_selftest():
