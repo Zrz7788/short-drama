@@ -144,6 +144,15 @@ def main():
         con.close()
         return rep.finish()
 
+    # 首帧是**纯影像**：字幕/台词文字/水印属于剪辑阶段，烧进首帧就是穿帮。
+    # 实测踩过：不加这句，模型会把台词当字幕烧进画面（14 张里 3 张中招）。
+    # 肯定式陈述（否定约束对画面无效），追加在提示词末尾，不污染第 6 阶段的库。
+    FRAME_SUFFIX = ("画面为纯影像状态：画面中没有任何字幕、任何台词文字、"
+                    "任何标题文字与任何水印。")
+
+    for s in shots:
+        s["prompt"] = (s["prompt"].rstrip() + "\n\n" + FRAME_SUFFIX)
+
     todo = [s for s in shots if args.force or not s["keyframe_path"]]
     rep.add("待生成镜头数", True, "%d / %d" % (len(todo), len(shots)))
 
