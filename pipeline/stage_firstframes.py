@@ -153,6 +153,9 @@ def main():
     for s in shots:
         s["prompt"] = (s["prompt"].rstrip() + "\n\n" + FRAME_SUFFIX)
 
+    # 复盘补记：视频模型输入参考图与画幅的坑都写在《拾音人》§一.3——
+    # 16:9 横屏生成、后期裁 9:16 可降低字幕概率（本约束句是第二道保险）。
+
     todo = [s for s in shots if args.force or not s["keyframe_path"]]
     rep.add("待生成镜头数", True, "%d / %d" % (len(todo), len(shots)))
 
