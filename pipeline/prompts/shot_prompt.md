@@ -13,6 +13,8 @@ $entity_block
 
 【声音】$sfx_line
 
+【转场】$transition_line
+
 $locks_block
 
 $on_screen_text

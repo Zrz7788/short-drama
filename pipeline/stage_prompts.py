@@ -152,6 +152,10 @@ def build(shot, ents):
         description=(shot["description"] or "").strip(),
         lighting=(shot["lighting"] or "").strip() or "自然光",
         sfx_line=("环境音：" + shot["sfx"].strip()) if shot["sfx"] else "",
+        # 转场接续提示（依外部教程做法：每个提示词结尾给一句契合画面的转场，
+        # 管 80 秒成片的镜头衔接）。shot.transition 为空就不占位，不编造。
+        transition_line=(str(shot["transition"]).strip()
+                         if (shot["transition"] or "").strip() else ""),
         consistency_line=consistency_line(ents, shot),
         locks_block=locks_block(shot),
         on_screen_text=("画面文字（本镜唯一一次显示，逐字照此）："
@@ -199,7 +203,7 @@ def main():
               " description, action,"
               " screen_direction, count_lock, stillness_lock, positive_locks,"
               " on_screen_text,"
-        " lighting, dialogue, sfx, strategy FROM shot WHERE episode_id=? ORDER BY seq",
+        " lighting, dialogue, sfx, transition, strategy FROM shot WHERE episode_id=? ORDER BY seq",
         (ep["id"],)).fetchall()
     if not shots:
         rep.add("已有分镜", False, "先跑第 5 阶段")
