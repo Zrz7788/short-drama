@@ -78,6 +78,12 @@ FULLBODY = ("fullbody", "全身照",
 SCENE_FRONT = ("scene_front", "场景正视图",
                "正面平视视角的完整场景，无人物，自然光照，"
                "空间结构与纵深清楚。")
+# 侧视图：以正视图为参考转机位（见 SCENE_SIDE_DESC 的说明）。
+# 用途：正反打/侧面机位的镜头（如对手戏越肩镜）需要侧面空间关系，
+# 只有正视图时模型会自己编侧面布局，家具门窗就漂了。
+SCENE_SIDE = ("scene_side", "场景侧视图",
+              "侧面平视视角的同一空间，无人物，自然光照，"
+              "与正视图为同一房间、同一布局。")
 SCENE_TOP = ("scene_top", "场景俯视图",
              "约 30 度俯视视角的完整场景，无人物，"
              "清楚交代空间布局、通道走向与家具摆位。")
@@ -134,16 +140,29 @@ SCENE_EXPAND_DESC = (
     "空间结构完全不变，只向外补全墙、门、天花、地面与周边陈设。"
     "**画面分前景、中景、后景三层**，前景留具体物体、后景交代空间纵深。")
 
+# 场景**侧视图**（i2i，以正视图为参考转视角）。
+# 依据桌面教程（AI漫剧小小系列）：同一空间做多机位时，最容易崩的是
+# 侧面——模型会自作主张加门窗、复制家具、改结构。锁就一句：
+# 「不新增门窗、不复制家具、不改变原有结构」，再加正面措辞要求
+# 门窗/家具/灯具**保持原位原样**（否定约束对画面无效，必须正面陈述）。
+SCENE_SIDE_DESC = (
+    "将参考图的同一空间转为**侧面视角**重新取景；"
+    "空间结构、门窗位置与数量、家具陈设、灯具、材质与色调**全部保持原位原样**，"
+    "不新增门窗、不复制家具、不改变原有结构与布局；"
+    "只是机位从正面移到侧面，自然光照与参考图一致。")
+
+# ---------------------------------------------------------------- 人物素材
+
 # 人物素材：main 出两张，secondary 只出全身照（不会有面部大特写）
 CHARACTER_VIEWS = {
     "main": [HEADSHOT, FULLBODY],
     "secondary": [FULLBODY],
     "background": [],
 }
-# 场景素材：核心场景出四张（含子空间），一次性场景出三张
+# 场景素材：核心场景出五张（含子空间与侧视图），一次性场景出三张
 SCENE_VIEWS = {
-    "main": [SCENE_SUBSPACE, SCENE_FRONT, BLOCKING, SCENE_TOP],
-    "secondary": [SCENE_SUBSPACE, SCENE_FRONT, BLOCKING],
+    "main": [SCENE_SUBSPACE, SCENE_FRONT, SCENE_SIDE, BLOCKING, SCENE_TOP],
+    "secondary": [SCENE_SUBSPACE, SCENE_FRONT, SCENE_SIDE, BLOCKING],
     "background": [],
 }
 
@@ -224,6 +243,8 @@ def build_view_prompt(e, view_name, view_desc, reference=None):
     desc = view_desc
     if view_name == "scene_front" and reference:
         desc = SCENE_EXPAND_DESC
+    if view_name == "scene_side" and reference:
+        desc = SCENE_SIDE_DESC
     return L.load_prompt(
         TPL,
         entity_block=entity_block(e),
@@ -483,7 +504,7 @@ def main():
         #   正视图   -> **以子空间为参考做扩图**（"保持参考图中间不变"）
         #   俯视/站位 -> 以正视图为参考（保持同一空间）
         if e["kind"] == "location":
-            if view in ("scene_top", "blocking"):
+            if view in ("scene_top", "blocking", "scene_side"):
                 return have.get((e["id"], "scene_front"))
             if view == "scene_front":
                 return have.get((e["id"], "scene_subspace"))
@@ -510,10 +531,10 @@ def main():
     planned = 0
     # 生成顺序**由参考链决定**：被参考的先生成。
     #   人物：全身照 -> 大头照
-    #   场景：子空间 -> 正视图（扩图）-> 俯视图 / 站位图
+    #   场景：子空间 -> 正视图（扩图）-> 侧视图（转机位）-> 俯视图 / 站位图
     ORDER = {"fullbody": 0, "headshot": 1,
-             "scene_subspace": 0, "scene_front": 1,
-             "scene_top": 2, "blocking": 2, "prop_ref": 0}
+             "scene_subspace": 0, "scene_front": 1, "scene_side": 2,
+             "scene_top": 3, "blocking": 3, "prop_ref": 0}
 
     def ordered(e):
         return sorted(views_for(e), key=lambda v: ORDER.get(v[0], 9))

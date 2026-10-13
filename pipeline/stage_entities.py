@@ -33,12 +33,12 @@ IMAGES_PER_TIER = {"main": 4, "secondary": 1, "background": 0}   # 旧口径，�
 
 # 新素材体系下的出图张数（依据 stage_refs 的 CHARACTER_VIEWS / SCENE_VIEWS）：
 #   人物  main=大头照+全身照=2   secondary=全身照=1
-#   场景  main=正视图+站位图+俯视图=3   secondary=正视图+站位图=2
+#   场景  main=子空间+正视图+侧视图+站位图+俯视图=5   secondary=子空间+正视图+侧视图+站位图=4
 #   道具  main/secondary=1
 # 这里**不 import stage_refs**，因为本阶段（第 2 阶段）要能独立跑，
 # 而 stage_refs 会拉起 Ark 相关的依赖。数字变了要同步改两处。
 _IMG_BY_KIND = {"character": {"main": 2, "secondary": 1, "background": 0},
-                "location": {"main": 3, "secondary": 2, "background": 0},
+                "location": {"main": 5, "secondary": 4, "background": 0},
                 "prop": {"main": 1, "secondary": 1, "background": 0}}
 
 
