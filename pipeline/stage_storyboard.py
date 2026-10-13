@@ -288,25 +288,42 @@ def persist(con, ep, shots, by_seq, ent_by_name, dry):
     if dry:
         return
     for s in shots:
+        # 具名参数： positional 占位符在 28 列这种长度下数错一次就炸一次
+        # （刚才 29 values for 28 columns 就是数错的），列名与键名一一对应。
+        vals = {
+            "episode_id": ep["id"],
+            "scene_id": by_seq[s["scene_seq"]],
+            "seq": s["seq"],
+            "duration_s": float(s["duration_s"]),
+            "shot_size": s["shot_size"],
+            "camera_move": s["camera_move"],
+            "description": s["description"],
+            "action": s["action"],
+            "lighting": s["lighting"],
+            "dialogue": s.get("dialogue") or "",
+            "sfx": s.get("sfx") or "",
+            "strategy": s["strategy"],
+            "camera_emotion": s["camera_emotion"],
+            "movement_speed": s["movement_speed"],
+            "camera_lock": s["camera_lock"],
+            "camera_angle": s["camera_angle"],
+            "lens_mm": s["lens_mm"],
+            "composition": s["composition"],
+            "dof": s["dof"],
+            "screen_direction": s.get("screen_direction") or "",
+            "count_lock": s.get("count_lock") or "",
+            "stillness_lock": s.get("stillness_lock") or "",
+            "positive_locks": s.get("positive_locks") or "",
+            "on_screen_text": s.get("on_screen_text") or "",
+            "transition": s.get("transition") or "",
+            "entrance": s.get("entrance") or "",
+            "draws_planned": int(s["draws_planned"]),
+        }
+        cols = ", ".join(vals)
+        marks = ", ".join(":%s" % k for k in vals)
         sid = con.execute(
-            "INSERT INTO shot (episode_id, scene_id, seq, duration_s, shot_size,"
-            " camera_move, description, action, lighting, dialogue, sfx, strategy,"
-            " camera_emotion, movement_speed, camera_lock, camera_angle, lens_mm,"
-            " composition, dof,"
-            " screen_direction, count_lock, stillness_lock, positive_locks,"
-            " on_screen_text, transition, entrance,"
-            " draws_planned, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pending')",
-            (ep["id"], by_seq[s["scene_seq"]], s["seq"], float(s["duration_s"]),
-             s["shot_size"], s["camera_move"], s["description"], s["action"],
-             s["lighting"], s.get("dialogue") or "", s.get("sfx") or "",
-             s["strategy"],
-             s["camera_emotion"], s["movement_speed"], s["camera_lock"],
-             s["camera_angle"], s["lens_mm"], s["composition"], s["dof"],
-             s.get("screen_direction") or "", s.get("count_lock") or "",
-             s.get("stillness_lock") or "", s.get("positive_locks") or "",
-             s.get("on_screen_text") or "",
-             s.get("transition") or "", s.get("entrance") or "",
-             int(s["draws_planned"]))).lastrowid
+            "INSERT INTO shot (%s, status) VALUES (%s, 'pending')"
+            % (cols, marks), vals).lastrowid
         for e in s["entities"]:
             con.execute("INSERT OR IGNORE INTO shot_entity (shot_id, entity_id, role) "
                         "VALUES (?,?,?)", (sid, ent_by_name[e["name"]], e["role"]))
