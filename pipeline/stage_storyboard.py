@@ -38,6 +38,17 @@ CAMERA_LOCKS = {"匀速无卡顿", "画面无模糊拖影", "边缘无拉伸", "
 CAMERA_REQUIRED = ("camera_emotion", "movement_speed", "camera_lock",
                    "camera_angle", "lens_mm", "composition", "dof")
 
+# 景别跟情绪走（外部教程印证，用得越一致成片越不呆）：
+#   人物登场 → 全景交代空间；情绪反应 → 近景/特写；冲突 → 快切（拆多镜）。
+# 只能机械查"同一场清一色景别"——那几乎一定是没做景别设计。
+EMOTION_SIZES = {"登场": ("extreme_wide", "wide"),
+                 "反应": ("close", "close_up", "medium_close")}
+
+# action 里的情绪形容词：模型执行不了"她很震惊"，只能执行可见的动作。
+# 依据与《视觉设定》"抽象效果无法执行"同源——那条管实体描述，这条管动作。
+EMOTION_WORDS = ("震惊", "惊讶", "愤怒", "慌张", "犹豫", "紧张", "悲伤", "开心",
+                 "害怕", "恐惧", "绝望", "痛苦", "焦虑", "羞愧", "得意", "不屑")
+
 SPEC = {
     "shots": [{
         "scene_seq": int,
@@ -203,6 +214,32 @@ def check_shots(con, ep, shots, scenes, entities):
                         "倒计时/读数**绝不要靠多次显示数字**来表现，"
                         "改用红字往下跳的动作、光的变化或人物呼吸"
                         % (n, txt[:24]))
+
+    # ---- 景别多样性（跨镜头，按场看）----
+    # 成片"呆/人机感重"最常见的根因之一：一整场从头到尾同一个景别。
+    # 只报"清一色"，不规定哪一镜该用什么——景别设计是导演工作。
+    by_scene = {}
+    for s in shots:
+        by_scene.setdefault(s["scene_seq"], []).append(s)
+    for scene_seq, group in sorted(by_scene.items()):
+        if len(group) >= 3:
+            sizes = {s["shot_size"] for s in group}
+            if len(sizes) == 1:
+                warn.append("第%d场 %d 个镜全是 %s——景别没跟情绪走"
+                            "（登场全景交代、反应近景捕捉、冲突拆快切），"
+                            "一景到底的成片节奏是平的"
+                            % (scene_seq, len(group), next(iter(sizes))))
+
+    # ---- action 里的情绪形容词（单镜可查）----
+    # "她很震惊"对模型是一句空话——它不知道震惊长什么样，只会自由发挥。
+    # 要求改成可见动作（捏皱纸、后退半步、呼吸一滞…）。
+    for s in shots:
+        act = str(s.get("action") or "")
+        hit = [w for w in EMOTION_WORDS if w in act]
+        if hit:
+            warn.append("第%d镜 action 含情绪形容词「%s」——模型执行不了情绪，"
+                        "只能执行动作：改成可见的身体反应（如「指节捏白」「后退半步」）"
+                        % (s["seq"], "、".join(hit[:3])))
 
     if block:
         raise L.LLMError(
