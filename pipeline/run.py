@@ -198,6 +198,7 @@ def run_one(con, args, m, key, quiet=False):
 
 
 def main():
+    C.setup_console()   # 别让一个 "¥" 把 --status 整个打挂（见 common.setup_console）
     ap = argparse.ArgumentParser(description="短剧流水线入口")
     ap.add_argument("--episode-id", type=int)
     ap.add_argument("--db", default=C.DEFAULT_DB)

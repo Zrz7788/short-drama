@@ -1,0 +1,149 @@
+{
+  "episode": 1,
+  "method": "salience(maximin/pan)",
+  "ratio": "9:16",
+  "shots": {
+    "1": {
+      "best_range": [
+        0,
+        45
+      ],
+      "frames": 20,
+      "mode": "static",
+      "travel": 0.2714,
+      "worst": 0.9365,
+      "x": 0.2714
+    },
+    "10": {
+      "best_range": [
+        32,
+        80
+      ],
+      "frames": 20,
+      "mode": "static",
+      "travel": 0.2214,
+      "worst": 0.9106,
+      "x": 0.3714
+    },
+    "11": {
+      "manual": true,
+      "mode": "static",
+      "x": 0.25
+    },
+    "12": {
+      "best_range": [
+        0,
+        140
+      ],
+      "frames": 20,
+      "mode": "static",
+      "travel": 0.4357,
+      "worst": 0.8729,
+      "x": 0.7857
+    },
+    "13": {
+      "best_range": [
+        0,
+        140
+      ],
+      "frames": 24,
+      "mode": "static",
+      "travel": 0.0,
+      "worst": 0.6073,
+      "x": 1.0
+    },
+    "14": {
+      "best_range": [
+        94,
+        100
+      ],
+      "frames": 24,
+      "mode": "static",
+      "travel": 0.0214,
+      "worst": 0.8564,
+      "x": 0.7143
+    },
+    "2": {
+      "best_range": [
+        16,
+        107
+      ],
+      "frames": 20,
+      "mode": "static",
+      "travel": 0.5286,
+      "worst": 0.9114,
+      "x": 0.7643
+    },
+    "3": {
+      "best_range": [
+        140,
+        140
+      ],
+      "frames": 16,
+      "mode": "static",
+      "travel": 0.0,
+      "worst": 0.9494,
+      "x": 1.0
+    },
+    "4": {
+      "best_range": [
+        0,
+        102
+      ],
+      "frames": 16,
+      "mode": "static",
+      "travel": 0.7214,
+      "worst": 1.0022,
+      "x": 0.1429
+    },
+    "5": {
+      "best_range": [
+        0,
+        53
+      ],
+      "frames": 28,
+      "mode": "static",
+      "travel": 0.2286,
+      "worst": 0.7085,
+      "x": 0.0
+    },
+    "6": {
+      "best_range": [
+        27,
+        140
+      ],
+      "frames": 32,
+      "mode": "static",
+      "travel": 0.0071,
+      "worst": 0.7441,
+      "x": 0.3786
+    },
+    "7": {
+      "best_range": [
+        49,
+        63
+      ],
+      "frames": 32,
+      "mode": "static",
+      "travel": 0.0,
+      "worst": 0.8433,
+      "x": 0.3857
+    },
+    "8": {
+      "best_range": [
+        0,
+        81
+      ],
+      "frames": 28,
+      "mode": "static",
+      "travel": 0.0643,
+      "worst": 0.5382,
+      "x": 0.55
+    },
+    "9": {
+      "manual": true,
+      "mode": "static",
+      "x": 0.25
+    }
+  }
+}

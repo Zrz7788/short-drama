@@ -65,6 +65,25 @@ def load_env(path=None):
 ENV_LOADED = load_env()
 
 
+def setup_console():
+    """让输出不至于因为一个字符崩掉。
+
+    ⚠️ 实测：中文 Windows 控制台是 GBK，`run.py --status` 打印 "¥" 时
+    `UnicodeEncodeError: 'gbk' codec can't encode character '\\xa5'` ——
+    **整个 `--status` 直接挂掉，就因为一个货币符号**。
+    （GBK 里有全角 ￥ 但没有半角 ¥。）
+
+    这里保留控制台自己的编码（中文在 GBK 控制台里本来是正常的），
+    只把无法编码的字符降级成 "?"，不让它中断输出。
+    想强制 UTF-8 就按项目惯例设环境变量 PYTHONIOENCODING=utf-8。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def add_common_args(parser):
     parser.add_argument("--db", default=os.environ.get("DSH_DRAMA_DB", DEFAULT_DB),
                         help="数据库路径（默认 data/drama.db）")
@@ -221,7 +240,13 @@ def episode_shots(con, episode_id):
     """按镜号返回镜头及其选定成片。
 
     选定规则：优先 shot.selected_generation_id；
-    没指定时退回该镜头第一条 succeeded 的记录。
+    没指定时退回该镜头第一条 succeeded 的**成片**（is_draft=0）。
+
+    ⚠️ `is_draft=0` 这个条件是踩出来的：**样片是 480P**，
+    它同样是 `status='succeeded'`。少了这个条件，第 10 阶段拼片会
+    **悄悄把 480P 样片当成片拼进正片**——报告全绿、时长也对，只有画质不对
+    （实测：S11 刚出完样片，拼片就报"14/14 段"，其中一段是样片）。
+    样片只在 `stage_video.pick_draft()` 里被用（那是它的正经用途）。
     """
     rows = con.execute(
         """
@@ -239,6 +264,7 @@ def episode_shots(con, episode_id):
                ON g.id = COALESCE(s.selected_generation_id,
                                   (SELECT id FROM generation
                                     WHERE shot_id = s.id AND status = 'succeeded'
+                                      AND is_draft = 0
                                     ORDER BY attempt_no LIMIT 1))
         WHERE s.episode_id = ?
         ORDER BY s.seq
