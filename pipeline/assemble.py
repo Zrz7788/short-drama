@@ -216,6 +216,11 @@ def main():
     out_dir = C.abs_path(args.out)
     tmp_dir = os.path.join(C.ROOT, ".tools", "tmp")
     name = "E%02d" % ep["seq"]
+    # 交付画幅不是项目画幅时，文件名带后缀（E01_169.mp4）——
+    # 否则「顺便出一版 16:9 对比」会**直接覆盖竖屏成片**（实测差点踩到）。
+    proj_ratio = ep.get("aspect_ratio") or "9:16"
+    if ratio and ratio != proj_ratio:
+        name += "_" + ratio.replace(":", "")
     final_rel = os.path.join(args.out, name + ".mp4")     # 交付目标（可能是 D: 绝对路径）
     # ⚠️ **ffmpeg 只能写工作区**（实测）：写工作区外（D:\dsh-film\...）一律
     # `Error opening output files: Permission denied`——**按进程名拦的，提权也没用**
