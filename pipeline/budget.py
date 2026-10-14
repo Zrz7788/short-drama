@@ -1,43 +1,42 @@
 # -*- coding: utf-8 -*-
-r"""花钱闸门 —— **超预算就拒绝生成**，不靠"记得传 --max-cost"。
+r"""花钱**可见性** —— 每步都报"本集已花多少"，默认**不拦人**。
 
-## 为什么要有这一层
+## 为什么默认不拦（2026-10-15 用户的决定）
 
-2026-10-15 的教训：钱"像流水一样"没了，不是因为某一笔花得离谱，
-而是**没有任何一道闸门**：
+第一版做成了硬闸门（超 ¥150 直接拒绝生成）。用户明确要求撤掉：
+**"第一次做少不了花冤枉钱"**，真正要的是把流程跑成"实践过、效果差不多"的配方，
+而不是被一个数字挡住。
 
-- `--max-cost` 是**可选项**：不传就完全不拦（默认 None）。谁会每次都记得传？
-- 它只看**本次**预估，不看**本集已经花了多少** —— 补跑三次，每次都"没超"。
-- 单价表本身还是错的（1080P 按 720P 的价记账），所以"预估"也没算对。
+所以这里退回到**只报数**：
+- 默认：打印「本集已花 / 本次预估 / 合计」，**放行**；
+- **只有显式设了 `DSH_EPISODE_BUDGET` 才拦截**——想收紧的时候自己开。
 
-所以这里做三件事：
+> 保留它的价值：钱"像流水一样"那次的根因之一，是**每一步都看不见累计**。
+> 报数与拦截是两件事，这里只做前者。
 
-1. **上限来自环境变量 `DSH_EPISODE_BUDGET`（默认 150 元/集）**，不用每次传参；
-2. 检查"**本集累计已花 + 本次预估**"，不是只看本次；
-3. 单价缺失（price_book 里没有对应分辨率的价）时**按"未知"处理并拒绝**，
-   而不是悄悄按 0 或按一个可能错的价估算 —— 记账错是这一轮所有问题的源头。
-
-用法（各阶段脚本自动调用，无需手工传参）：
+用法：
 
 ```bash
-set DSH_EPISODE_BUDGET=150        # Windows；不设则用默认 150
-python pipeline/stage_video.py --episode-id 1 --mode final
+python pipeline/stage_video.py --episode-id 1 --mode final      # 只报数
+set DSH_EPISODE_BUDGET=150                                      # 想拦了再开
 ```
 """
 from __future__ import annotations
 
 import os
 
-DEFAULT_CAP = 150.0
+DEFAULT_CAP = None          # None = 不拦
 
 
 def cap():
-    """本集上限（元）。环境变量优先，默认 150。"""
+    """本集上限（元）。**默认 None = 不拦**；设了 DSH_EPISODE_BUDGET 才生效。"""
     v = os.environ.get("DSH_EPISODE_BUDGET")
+    if v in (None, ""):
+        return None
     try:
-        return float(v) if v not in (None, "") else DEFAULT_CAP
+        return float(v)
     except ValueError:
-        return DEFAULT_CAP
+        return None
 
 
 def spent(con, episode_id, categories=("video", "image", "llm")):
@@ -50,19 +49,22 @@ def spent(con, episode_id, categories=("video", "image", "llm")):
 
 
 def check(con, episode_id, estimate, what="本次生成", hard=True):
-    """返回 (是否放行, 说明)。**不抛异常**，由调用方决定怎么处理。
+    """返回 (是否放行, 说明)。默认放行，只把数报清楚。
 
-    `hard=True` 时调用方应当在 False 时中止——**中止不是失败，是保护**。
+    `hard` 参数保留给调用方；真正的拦截只由 `cap()` 是否为 None 决定。
     """
     c = cap()
     used = spent(con, episode_id)
     projected = used + (estimate or 0.0)
-    msg = ("本集预算上限 ¥%.0f ｜ 已花 ¥%.2f ｜ %s预估 ¥%.2f ｜ 合计 ¥%.2f"
+    if c is None:
+        return True, ("本集已花 ¥%.2f ｜ %s预估 ¥%.2f ｜ 合计 ¥%.2f"
+                      "（未设 DSH_EPISODE_BUDGET，**不拦**，只报数）"
+                      % (used, what, estimate or 0.0, projected))
+    msg = ("本集上限 ¥%.0f ｜ 已花 ¥%.2f ｜ %s预估 ¥%.2f ｜ 合计 ¥%.2f"
            % (c, used, what, estimate or 0.0, projected))
     if projected > c:
-        return False, (msg + " —— **超限 ¥%.2f，已拒绝生成**。"
-                             "要放宽就设环境变量 DSH_EPISODE_BUDGET，"
-                             "或减少本次条数/降档（720P 便宜一半）。"
+        return False, (msg + " —— **超限 ¥%.2f，已拒绝生成**（你设了 "
+                             "DSH_EPISODE_BUDGET；清掉它就不拦）"
                        % (projected - c))
     return True, msg
 
@@ -70,4 +72,6 @@ def check(con, episode_id, estimate, what="本次生成", hard=True):
 def report_line(con, episode_id):
     """给报表用的一行摘要。"""
     c, used = cap(), spent(con, episode_id)
+    if c is None:
+        return "本集已花 ¥%.2f（未设上限，只报数）" % used
     return "预算 ¥%.0f ｜ 已花 ¥%.2f ｜ 余 ¥%.2f" % (c, used, c - used)

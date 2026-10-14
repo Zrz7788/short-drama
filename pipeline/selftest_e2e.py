@@ -66,10 +66,6 @@ def run(script, args, llm_base, ark_base):
         ARK_BASE_URL=ark_base, ARK_API_KEY="test-key",
         DSH_ASSETS_ROOT=TEST_ASSETS,
         DSH_NO_DOTENV="1",   # 密闭：不读工作区 .env 的真实凭证
-        # 单集预算闸门：自检里"花的钱"是假 Ark 造出来的（每镜 ¥4），
-        # 跑满十个阶段必然超过真实上限——**这是测试数据，不是真实消费**，
-        # 所以在这里把上限放到很高。真实生产用默认 150 或自己设。
-        DSH_EPISODE_BUDGET="100000",
     )
     return subprocess.run([sys.executable, "-X", "utf8",
                            os.path.join(C.ROOT, "pipeline", script)] + args,

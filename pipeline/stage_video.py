@@ -318,19 +318,16 @@ def main():
             return rep.finish()
         rep.add("预算检查通过", True, "¥%.0f ≤ ¥%.0f" % (estimate, args.max_cost))
 
-    # ---- 全局花钱闸门（不看有没有传 --max-cost）----
+    # ---- 花钱可见性（默认只报数，不拦）----
     #
-    # 显式传的 --max-cost 只管"本次"，而且**不传就完全不拦**。
-    # 这里加一道**始终生效**的闸门：上限取 DSH_EPISODE_BUDGET（默认 150 元/集），
-    # 比的是 **本集累计已花 + 本次预估**。
-    # 依据：2026-10-15，钱"像流水一样"，就是因为没有任何一道闸门——
-    # 补跑三次，每次都"没超"。
+    # 用户 2026-10-15 明确要求**不要硬闸门**（"第一次做少不了花冤枉钱"）。
+    # 所以这里默认放行、只把「本集已花 + 本次预估」摆出来；
+    # 想让脚本替你把门，就自己设 DSH_EPISODE_BUDGET。
+    # 依据：钱"像流水一样"那次的根因之一是**每一步都看不见累计**，
+    # 报数与拦截是两件事——这一层只做前者。
     import budget as BG  # noqa: E402  （pipeline/ 已在 sys.path）
     ok_b, why_b = BG.check(con, ep["id"], estimate, "本次视频")
-    rep.add("本集预算闸门", ok_b, why_b)
-    if not ok_b:
-        con.close()
-        return rep.finish()
+    rep.add("本集花费（只报数）", True, why_b)
 
     if args.dry_run:
         for s, a, img, note, is_d, src, m in plan[:8]:
