@@ -368,12 +368,13 @@ def prod_unchanged(before, after=None):
 
 
 def frame_paths(episode_seq, shot_seq):
-    """抽帧产物路径。返回相对仓库根的路径，便于存库与迁移。"""
+    """抽帧产物路径。返回跨盘可用的路径（相对仓库根，跨盘则绝对）。"""
     d = os.path.join(assets_root(), "frames")
     first = os.path.join(d, "E%02dS%03d_first.png" % (episode_seq, shot_seq))
     last = os.path.join(d, "E%02dS%03d_last.png" % (episode_seq, shot_seq))
-    return (os.path.relpath(first, ROOT).replace("\\", "/"),
-            os.path.relpath(last, ROOT).replace("\\", "/"))
+    # assets_root 配在 D 盘时 os.path.relpath 会炸（跨盘 ValueError）——
+    # 复用 asset_rel 的跨盘逻辑，不重复实现。
+    return (asset_rel(first), asset_rel(last))
 
 
 def abs_path(rel):
