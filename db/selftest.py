@@ -188,13 +188,14 @@ def main():
         # 这一项专门防多表 JOIN 的笛卡尔积导致秒数虚高
         check("v_episode_outline.shot_seconds", r["shot_seconds"], SHOTS * SHOT_SECONDS)
 
-        # 原断言是"每镜 attempts 恰好等于 DRAWS_EACH+1"——把"当时恰好为真"写成了断言。
-        # 真实生产必然有重试/失败/额外尝试（EP001 实测 S07 有 5 次尝试），精确相等必然坏。
-        # 且 v_shot_progress 跨 episode——必须限定 eid，否则生产库的镜混进计数。
-        # 真正要防的是视图的 JOIN 笛卡尔积虚高——用下界检查：本集每镜至少一次成片尝试。
-        n = con.execute("SELECT COUNT(*) FROM v_shot_progress WHERE episode_seq=? AND attempts>=?",
+        # v_shot_progress.episode_seq 是 e.seq（每项目内序号），不是 episode 的 rowid！
+        # 两者只在"seq 与 rowid 恰好相等"时才一样——生产 EP001 碰巧相等掩盖了这个 bug
+        # （显式传 seq=99 的复现里 bug 立即显形）。用 shot.episode_id（rowid）过滤才正确。
+        n = con.execute("""SELECT COUNT(*) FROM v_shot_progress
+                           WHERE shot_id IN (SELECT id FROM shot WHERE episode_id=?)
+                           AND attempts>=?""",
                         (eid, DRAWS_EACH + 1)).fetchone()[0]
-        check("v_shot_progress 每镜 attempts（下界，限本集）", n, SHOTS)
+        check("v_shot_progress 每镜 attempts（下界，限本集 rowid）", n, SHOTS)
 
         # 单集成本应还原知识库里的 ¥178.4
         check("与知识库单集成本对齐", r["shot_seconds"] and VIDEO_TOTAL, 178.40)
