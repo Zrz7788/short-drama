@@ -449,13 +449,33 @@ def main():
         con.execute("UPDATE generation SET status='succeeded', video_url=?, local_path=?,"
                     " ratio=?, cost=?, finished_at=datetime('now','localtime') WHERE id=?",
                     (url, rel, gdet.get("aspect"), cost, gid))
-        con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
-                    " unit_price, amount, episode_id, shot_id, note) "
-                    "VALUES ('video',?,?, 'second',?,?,?,?,?)",
-                    (s_model, s["duration_s"], m_pps or 0, cost,
-                     ep["id"], s["id"],
-                     "%s S%03d a%s" % ("样片" if is_draft else "成片", s["seq"],
-                                        attempt or 1)))
+        # ---- 记账：优先记**真实 token**，记不到才退回"秒 × 单价" ----
+        #
+        # ⚠️ 为什么：Seedance 在控制台是**按 token 计价**、且**按分辨率分档**的
+        # （480P 不含视频输入 ¥70/百万 token、含视频输入 ¥42/百万 token）。
+        # 我们原来的账一律是 `秒数 × ¥1.45`，而 ¥1.45 被标成 1080P 单价、
+        # 实际连 720P 的公开价（≈¥1.51/秒）都不到 → **1080P 的账严重偏低**，
+        # 直接造成"账本 ¥197 vs 充值账单 ¥400"（2026-10-15 对账）。
+        # 现在把响应里的 usage token 存下来（unit='mtoken'），
+        # 就算单价表还没补齐，**token 数是真实的**，补上单价即可重算历史账。
+        utok = A.usage_tokens_of(final)
+        if utok:
+            con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
+                        " unit_price, amount, episode_id, shot_id, note) "
+                        "VALUES ('video',?,?, 'mtoken',?,?,?,?,?)",
+                        (s_model, utok, 0.0, cost, ep["id"], s["id"],
+                         "%s S%03d a%s（**真实 token %d；token 单价表待补，"
+                         "此金额仍按秒估算**）"
+                         % ("样片" if is_draft else "成片", s["seq"],
+                            attempt or 1, utok)))
+        else:
+            con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
+                        " unit_price, amount, episode_id, shot_id, note) "
+                        "VALUES ('video',?,?, 'second',?,?,?,?,?)",
+                        (s_model, s["duration_s"], m_pps or 0, cost,
+                         ep["id"], s["id"],
+                         "%s S%03d a%s（响应无 usage，按秒估算）"
+                         % ("样片" if is_draft else "成片", s["seq"], attempt or 1)))
         # 没有指定选中项时，把第一条成功的设为默认，避免拼片时无从下手
         cur_sel = con.execute("SELECT selected_generation_id FROM shot WHERE id=?",
                               (s["id"],)).fetchone()["selected_generation_id"]

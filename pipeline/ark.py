@@ -303,6 +303,33 @@ DRAFT_REF_FIELD = "draft_task_id"
 TERMINAL = ("succeeded", "success", "failed", "error", "cancelled", "canceled", "expired")
 
 
+def usage_tokens_of(resp):
+    """从视频任务响应里取**真实计费 token 数**。
+
+    ⚠️ 为什么必须取：Seedance 是**按 token 计费**的（控制台给的是「元/百万 token」，
+    且**按分辨率分档**），不是"按秒乘一个固定单价"。
+    我们以前的账是 `秒数 × ¥1.45`——**那个 ¥1.45 被标成 1080P 单价，
+    但连 720P 的公开价（≈¥1.51/秒）都不到**，于是 1080P 的账严重偏低，
+    直接造成"账本 ¥197、充值账单 ¥400"对不上（2026-10-15 实测）。
+
+    响应里通常有 `usage: {completion_tokens / total_tokens}`。取不到返回 None——
+    **取不到就如实返回 None，不要拿秒数假装是 token**。
+    """
+    if not isinstance(resp, dict):
+        return None
+    u = resp.get("usage")
+    if isinstance(u, dict):
+        for k in ("total_tokens", "completion_tokens", "tokens"):
+            v = u.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                return int(v)
+    for k in ("total_tokens", "completion_tokens"):
+        v = resp.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            return int(v)
+    return None
+
+
 def video_url_of(resp):
     """从查询响应里取视频地址，兼容几种可能的嵌套。"""
     if not isinstance(resp, dict):
