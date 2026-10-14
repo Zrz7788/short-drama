@@ -31,7 +31,8 @@ pipeline/           管线阶段脚本
   stage_firstframes.py 第 7 阶段：生成首帧图（关键帧）
   stage_video.py      第 8 阶段：视频生成（draft / direct / final 三种模式）
   frames.py           第 9 阶段：抽首尾帧、建立镜头续接关系
-  assemble.py         第 10 阶段：拼接成集、可选烧字幕
+  crop_plan.py        逐镜算 9:16 裁切位置（横屏生成、竖屏交付缺的那一环）
+  assemble.py         第 10 阶段：拼接成集、交付画幅（裁/模糊填充）、烧字幕、响度归一
   selftest.py         管线端到端自检（合成素材 + 临时库）
   selftest_llm.py     第 1/2/5/6 阶段自检（本地假模型服务 + 临时库）
   selftest_ark.py     第 3/4/7/8 阶段自检（本地假 Ark 服务 + 临时库）
@@ -52,6 +53,9 @@ tools/              工具
   check_ark.py       Ark 配置检查（零成本：故意发错参数看错误码，区分密钥错与权限没开）
   verify.py          全量验收（含全链路集成）
   verify_ffmpeg.py   ffmpeg 功能验证（编码器/滤镜/中文字幕）
+  qc_frames.py       成片机械体检（亮度/色温/清晰度/运动量：查糊、静帧、接缝跳光）
+  audio_check.py     音轨有没有人声（本机无 ASR，用四个信号特征量：浊音占比+调制+音调+频带）
+  subtitle.py        出字幕（台词来自库、说话窗口来自音频实测；.srt 给平台 + .ass 烧录用）
 .tools/              便携工具链，不进 git
   mingit/            Git 2.56.0（免安装版）
   ffmpeg/            FFmpeg n9.0（免安装版）
