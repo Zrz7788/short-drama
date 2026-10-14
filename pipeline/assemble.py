@@ -251,10 +251,15 @@ def main():
 
     keep_audio = audios == {True}
 
+    # ⚠️ `-movflags +faststart` 不是可有可无的：ffmpeg 默认把 moov 原子写在文件**末尾**，
+    # 浏览器/网页预览要拿到整段才能起播，实测表现是"文件好好的，界面里打不开"。
+    # 拼片产物要给人**在界面里点开看**，所以一律 faststart。
+    FASTSTART = ["-movflags", "+faststart"]
+
     if can_copy:
         # --- 快路：免重编码 ---
         r = C.run_ffmpeg(["-f", "concat", "-safe", "0", "-i", list_file,
-                          "-c", "copy", stage_rel], cwd=C.ROOT)
+                          "-c", "copy"] + FASTSTART + [stage_rel], cwd=C.ROOT)
         if r.returncode != 0:
             rep.info("copy 失败，转重编码：" + C.tail(r.stderr, 60))
             can_copy = False
@@ -297,13 +302,13 @@ def main():
             seg_list = os.path.join(tmp_dir, "concat_%s_seg.txt" % name)
             write_concat_list(segs, seg_list)
             r = C.run_ffmpeg(["-f", "concat", "-safe", "0", "-i", seg_list,
-                              "-c", "copy", stage_rel], cwd=C.ROOT)
+                              "-c", "copy"] + FASTSTART + [stage_rel], cwd=C.ROOT)
             if r.returncode != 0:
                 rep.info("归一化后 copy 拼接失败，转逐段转码拼接：" + C.tail(r.stderr, 60))
                 r = C.run_ffmpeg(["-f", "concat", "-safe", "0", "-i", seg_list,
                                   "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p"]
                                  + (["-c:a", "aac", "-ar", "48000"] if keep_audio else ["-an"])
-                                 + [stage_rel], cwd=C.ROOT)
+                                 + FASTSTART + [stage_rel], cwd=C.ROOT)
         else:
             r = rr
     rep.add("拼接输出", r.returncode == 0,
@@ -335,7 +340,7 @@ def main():
             r2 = C.run_ffmpeg(["-i", stage_rel, "-vf", "subtitles=%s" % srt_rel,
                                "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p"]
                               + (["-c:a", "copy"] if keep_audio else ["-an"])
-                              + [burn_rel], cwd=C.ROOT)
+                              + ["-movflags", "+faststart", burn_rel], cwd=C.ROOT)
             rep.add("字幕烧录", r2.returncode == 0,
                     C.tail(r2.stderr) if r2.returncode else burn_rel)
             if r2.returncode == 0:
