@@ -106,17 +106,24 @@ def main():
                   % (d, gen_day.get(d, 0), dia_day.get(d, 0),
                      gen_day.get(d, 0) + dia_day.get(d, 0)))
 
-    # Ark 余额（挂件记的），只作参考
+    # ⚠️ 这个余额**不是火山方舟的**：挂件跟踪的是**对话/LLM 账户**。
+    # 证据：2026-10-15 它记的扣减 ¥4.69 ≈ 本会话对话 ¥4.68（同一数量级且吻合）；
+    # 而方舟的图片/视频消费（当天 ¥30）它一分没动。**别把它当方舟余额看**——
+    # 我犯过这个错，在报表里写成"方舟账户余额"，会把人带偏。
     try:
         d = json.load(io.open(DSHW, encoding="utf-8"))
         if d.get("lastBalance") is not None:
-            print("\n方舟账户余额（挂件读数）：¥%.2f" % d["lastBalance"])
+            print("\n挂件跟踪的**对话账户**余额：¥%.2f（**不是火山方舟余额**）"
+                  % d["lastBalance"])
     except (ValueError, OSError, KeyError):
         pass
 
     print("\n⚠️ 口径说明：`cost_ledger` 记的是**按单价估算**的应付；")
     print("   平台账单可能因**失败任务 / 未登记价格 / 四舍五入**而有出入。")
-    print("   真正的对账依据是平台后台的消费明细，本表用来**定位差额在哪一类**。")
+    print("   真正的对账依据是**平台后台的账单明细**，本表用来**定位差额在哪一类**。")
+    print("   已知未入账项：① 文本 LLM（2026-10-15 前的调用**全都没记**）")
+    print("                ② 失败/被拦任务（库里能看到记录，账本里没有金额）")
+    print("   → 拿到后台账单后，跑 `python tools/cost_report.py --reconcile` 逐条对。")
     return 0
 
 
