@@ -37,6 +37,26 @@ from pipeline import common as C  # noqa: E402
 VARIANT_DRAFT = "Draft 样片"
 VARIANT_FINAL = "旗舰"
 
+# 按 strategy 映射视频模型（2026-10-14 与用户定的混合策略）：
+#   strategy='direct'（空镜/背影/手部特写等简单镜）→ Seedance 2.0 标准（¥1.00/秒），
+#     它完全够用，省 31%；
+#   strategy='draft'（正脸/特写/对手戏等难镜）→ Seedance 2.5 旗舰（¥1.45/秒），
+#     脸崩一镜重抽一次就吃掉全部差价。
+# 依据《单集成本模型.md》：「视频抽卡占 91%，一次多余抽卡（4 秒 ≈ ¥5.8）就能吃掉
+# 换成便宜模型省下的全部差价」——难点用贵模型是为了一次过，不是浪费。
+# 注意：Draft 样片档只有 2.5 有价（2.0 无 Draft 价），所以 draft 模式全走 2.5。
+MODEL_BY_STRATEGY = {
+    ("draft", "draft"): "doubao-seedance-2-5-260628",     # 样片：统一 2.5（只有它有 Draft 价）
+    ("final", "draft"): "doubao-seedance-2-5-260628",     # 难镜成片：2.5
+    ("final", "direct"): "doubao-seedance-2-0-260128",    # 简单镜成片：2.0 省 31%
+}
+
+# 生成画幅 16:9（2026-10-14 用户拍板）：横屏生成、后期统一裁 9:16。
+# 依据《拾音人范本与工艺规范》§一.3——竖屏直出爱烧字幕（首帧 14 张 3 张中招实测），
+# 且横屏构图容错高、多平台分发一份素材两用。剪辑阶段用 ffmpeg crop 裁 9:16。
+# 规格门仍按项目 aspect_ratio 校验——所以生成时 ratio 用 16:9，但 spec_gate
+# 的 target_aspect 传生成画幅，裁剪在拼片阶段做。
+
 
 def video_path(ep, shot_seq, attempt):
     p = os.path.join(C.assets_root(), "videos",
@@ -157,6 +177,10 @@ def main():
     res_default = "480p" if args.mode == "draft" else "1080p"
     resolution = args.resolution or res_default
     variant = VARIANT_DRAFT if args.mode == "draft" else VARIANT_FINAL
+
+    # 生成画幅：16:9 横屏（见文件头 MODEL_BY_STRATEGY 上方的说明）。
+    # 项目 aspect_ratio 仍是 9:16——那是**交付画幅**，裁剪在拼片阶段做。
+    GEN_RATIO = "16:9"
     pps = price_of(con, cfg["video_model"], variant)
 
     # ---- 计划与预算 ----
@@ -168,13 +192,17 @@ def main():
             if k.isdigit() and v.isdigit():
                 pick_map[int(k)] = int(v)
 
-    plan = []          # (shot, attempt_no, input_image, input_note, is_draft, 基准样片)
+    plan = []          # (shot, attempt_no, input_image, input_note, is_draft, 基准样片, model_id)
     for s in sel:
         img, note = resolve_input(con, s)
         # 抽号必须接着该镜已有的最大值往后排，否则会撞 generation 的
         # UNIQUE(shot_id, attempt_no)。final 模式尤其容易踩——它前面已经有样片了。
         done = con.execute("SELECT COALESCE(MAX(attempt_no),0) AS n FROM generation "
                            "WHERE shot_id=?", (s["id"],)).fetchone()["n"]
+        # 模型按 strategy 映射（MODEL_BY_STRATEGY）；--video-model 显式传参则整体覆盖
+        s_model = cfg["video_model"] if args.video_model \
+            else MODEL_BY_STRATEGY.get((args.mode, s["strategy"]),
+                                       cfg["video_model"])
         if args.mode == "final":
             src = pick_draft(con, s["id"],
                              (s["seq"], pick_map[s["seq"]]) if s["seq"] in pick_map else None)
@@ -182,7 +210,9 @@ def main():
                 rep.info("S%02d 跳过：没有可用样片" % s["seq"])
                 continue
             plan.append((s, done + 1, img,
-                         "%s；基准样片 a%02d" % (note, src["attempt_no"]), 0, src))
+                         "%s；基准样片 a%02d [%s]" % (note, src["attempt_no"],
+                                                      s_model.rsplit("-", 1)[0]),
+                         0, src, s_model))
         else:
             if done and not args.force:
                 rep.info("S%02d 跳过：已有 %d 条生成记录（--force 可重出）" % (s["seq"], done))
@@ -190,7 +220,7 @@ def main():
             n = args.attempts if args.attempts is not None else s["draws_planned"]
             for a in range(1, int(n) + 1):
                 plan.append((s, done + a, img, note,
-                             1 if args.mode == "draft" else 0, None))
+                             1 if args.mode == "draft" else 0, None, s_model))
 
     if not plan:
         # ⚠️ 「没事可做」**不是失败**。原来这里记成 False，于是"这一档已经全出完了"
@@ -200,20 +230,28 @@ def main():
         con.close()
         return rep.finish()
 
-    total_s = sum(s["duration_s"] for s, _a, _i, _n, _d, _src in plan)
+    total_s = sum(s["duration_s"] for s, _a, _i, _n, _d, _src, _m in plan)
     rep.add("计划生成条数", True, "%d 条，合计 %.0f 秒" % (len(plan), total_s))
-    no_img = sum(1 for _s, _a, i, _n, _d, _src in plan if not i)
+    no_img = sum(1 for _s, _a, i, _n, _d, _src, _m in plan if not i)
     if no_img:
         rep.info("其中 %d 条没有输入图（纯文生视频），一致性会明显更差" % no_img)
 
-    if pps is None:
-        rep.info("price_book 无 %s / %s 的单价，成本将记 0，请补价目"
-                 % (cfg["video_model"], variant))
-        estimate = None
-    else:
-        estimate = total_s * pps
-        rep.add("预估成本", True, "约 ¥%.0f（%.0f 秒 × ¥%.2f/秒，%s）"
-                % (estimate, total_s, pps, variant))
+    # 分模型估价：2.0 与 2.5 单价不同，plan 里可能混两档
+    by_model = {}
+    for s, _a, _i, _n, _d, _src, m in plan:
+        by_model.setdefault(m, 0.0)
+        by_model[m] += s["duration_s"]
+    estimate, est_parts = 0.0, []
+    for m, secs in sorted(by_model.items()):
+        p = price_of(con, m, variant)
+        if p is None:
+            rep.info("price_book 无 %s / %s 的单价，该档成本记 0，请补价目" % (m, variant))
+            est_parts.append("%s: ?" % m.rsplit("-", 1)[0])
+            continue
+        estimate += secs * p
+        est_parts.append("%s: %.0fs×¥%.2f=¥%.0f" % (m.rsplit("-", 1)[0], secs, p, secs * p))
+    rep.add("预估成本", True, "约 ¥%.0f（%s；%s）"
+            % (estimate, " + ".join(est_parts), variant))
 
     if args.max_cost is not None:
         if estimate is None:
@@ -228,10 +266,11 @@ def main():
         rep.add("预算检查通过", True, "¥%.0f ≤ ¥%.0f" % (estimate, args.max_cost))
 
     if args.dry_run:
-        for s, a, img, note, is_d, src in plan[:8]:
-            rep.info("S%02d a%s  %ss  %s  %s  %s"
+        for s, a, img, note, is_d, src, m in plan[:8]:
+            rep.info("S%02d a%s  %ss  %s  %s  [%s]  %s"
                      % (s["seq"], a or "-", s["duration_s"],
-                        "样片" if is_d else "成片", resolution, note))
+                        "样片" if is_d else "成片", resolution,
+                        m.rsplit("-", 1)[0], note))
         if len(plan) > 8:
             rep.info("…… 其余 %d 条略" % (len(plan) - 8))
         rep.info("dry-run：未提交任何任务")
@@ -241,12 +280,14 @@ def main():
     # ---- 实际提交 ----
     print()
     ok_all, spent = True, 0.0
-    for s, attempt, img, note, is_draft, src in plan:
+    for s, attempt, img, note, is_draft, src, s_model in plan:
         tag = "S%02d %s" % (s["seq"], "样片 a%s" % attempt if is_draft else "成片")
+        m_pps = price_of(con, s_model, variant)
         try:
             created = A.create_video_task(
-                s["prompt"], model=cfg["video_model"], duration=s["duration_s"],
+                s["prompt"], model=s_model, duration=s["duration_s"],
                 resolution=resolution, draft=bool(is_draft), reference_image=img,
+                ratio=GEN_RATIO,
                 sample_task_id=(src or {}).get("task_id") if src else None,
                 base_url=cfg["base_url"], api_key=cfg["api_key"])
         except A.ArkError as ex:
@@ -254,7 +295,7 @@ def main():
                 "INSERT INTO generation (shot_id, attempt_no, model_id, resolution,"
                 " duration_s, is_draft, status, error, cost) "
                 "VALUES (?,?,?,?,?,?,'failed',?,0)",
-                (s["id"], attempt or 1, cfg["video_model"], resolution,
+                (s["id"], attempt or 1, s_model, resolution,
                  s["duration_s"], 1 if is_draft else 0, str(ex)[:500]))
             con.commit()
             rep.add(tag, False, str(ex).splitlines()[0][:60])
@@ -264,12 +305,17 @@ def main():
             ok_all = False
             continue
 
+        # 具名参数：28 列这种规模的 INSERT 数占位符必炸（复盘 §六），一律 :key 绑定
+        gvals = {"shot_id": s["id"], "attempt_no": attempt or 1,
+                 "model_id": s_model, "resolution": resolution,
+                 "duration_s": s["duration_s"],
+                 "is_draft": 1 if is_draft else 0,
+                 "ratio": GEN_RATIO, "task_id": created["task_id"]}
+        gcols = ", ".join(gvals)
+        gmarks = ", ".join(":%s" % k for k in gvals)
         gid = con.execute(
-            "INSERT INTO generation (shot_id, attempt_no, model_id, resolution,"
-            " duration_s, is_draft, ratio, task_id, status, cost) "
-            "VALUES (?,?,?,?,?,?,'9:16',?,'running',0)",
-            (s["id"], attempt or 1, created["model"], resolution, s["duration_s"],
-             1 if is_draft else 0, created["task_id"])).lastrowid
+            "INSERT INTO generation (%s, status, cost) VALUES (%s, 'running', 0)"
+            % (gcols, gmarks), gvals).lastrowid
         con.commit()
 
         try:
@@ -287,7 +333,7 @@ def main():
 
         status = str(final.get("status") or "").lower()
         url = A.video_url_of(final)
-        cost = (s["duration_s"] * pps) if pps is not None else 0.0
+        cost = (s["duration_s"] * m_pps) if m_pps is not None else 0.0
         if status not in ("succeeded", "success") or not url:
             con.execute("UPDATE generation SET status='failed', error=?, cost=0, "
                         "finished_at=datetime('now','localtime') WHERE id=?",
@@ -311,9 +357,10 @@ def main():
         # 1280×720、640×480 都出现过），而当时没有任何一步能拦住。
         # **不合格就直接判失败、计入本次尝试——不写 local_path、不进语义检查。**
         # 先保证它是合法产物，再谈它好不好；顺序不能反。
-        _sa = ep.get("aspect_ratio") or "9:16"
+        # 画幅校验按**生成画幅 16:9**（GEN_RATIO）——交付的 9:16 是拼片阶段
+        # 裁剪出来的，此处生成物是横屏。
         try:
-            _aw, _ah = [float(x) for x in re.split(r"[:x×/]", _sa)[:2]]
+            _aw, _ah = [float(x) for x in re.split(r"[:x×/]", GEN_RATIO)[:2]]
             target_aspect = _aw / _ah if _ah else None
         except Exception:
             target_aspect = None
@@ -332,7 +379,7 @@ def main():
             con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                         " unit_price, amount, episode_id, shot_id, note) "
                         "VALUES ('video',?,?, 'second',?,?,?,?,?)",
-                        (cfg["video_model"], float(s["duration_s"]), pps or 0.0,
+                        (s_model, float(s["duration_s"]), m_pps or 0.0,
                          cost, ep["id"], s["id"],
                          "S%03d 规格门不过（%s）" % (s["seq"], gwhy[:60])))
             con.commit()
@@ -345,7 +392,7 @@ def main():
         con.execute("INSERT INTO cost_ledger (category, model_id, quantity, unit,"
                     " unit_price, amount, episode_id, shot_id, note) "
                     "VALUES ('video',?,?, 'second',?,?,?,?,?)",
-                    (cfg["video_model"], s["duration_s"], pps or 0, cost,
+                    (s_model, s["duration_s"], m_pps or 0, cost,
                      ep["id"], s["id"],
                      "%s S%03d a%s" % ("样片" if is_draft else "成片", s["seq"],
                                         attempt or 1)))

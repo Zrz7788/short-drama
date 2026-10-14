@@ -140,8 +140,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             blob = Handler.video_cache.get(tid)
             if blob is None:
                 short = {"480p": 480, "720p": 720, "1080p": 1080}.get(res, 1080)
+                # 生成画幅已改 16:9（stage_video GEN_RATIO），假服务必须跟着
+                # 产出横屏——否则 U0 规格门按 16:9 校验会全拦（实测全挂过）。
                 blob, _note = make_mp4(root=TEST_ROOT, short_side=short,
-                                       seconds=float(dur))
+                                       seconds=float(dur), aspect=16 / 9.0)
                 Handler.video_cache[tid] = blob
             return self._send(200, blob, "video/mp4")
         if self.path.startswith("/mock/"):
@@ -609,8 +611,8 @@ def main():
         rep.add("content 带参考图",
                 any(c.get("type") == "image_url" for c in b.get("content", [])),
                 "content 段数 %d" % len(b.get("content", [])))
-        rep.add("带 duration 与 ratio",
-                b.get("duration") == 4 and b.get("ratio") == "9:16",
+        rep.add("带 duration 与 ratio（生成画幅 16:9，交付 9:16 在拼片裁）",
+                b.get("duration") == 4 and b.get("ratio") == "16:9",
                 "duration=%s ratio=%s" % (b.get("duration"), b.get("ratio")))
         rep.add("成片不携带 draft 关联字段",
                 "draft_task_id" not in b)
