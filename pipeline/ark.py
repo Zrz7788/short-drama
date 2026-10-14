@@ -261,7 +261,10 @@ def create_video_task(prompt, model=None, ratio="9:16", duration=4,
         "model": model,
         "content": content,
         "ratio": ratio,
-        "duration": duration,
+        # duration 必须是整数秒——实测传 6.0（float）被 Ark 拒 400
+        # InvalidParameter: The parameter `duration` is not valid。
+        # 真实 API 的坑：本地语义对（6.0==6），线上 schema 不收浮点。
+        "duration": int(duration),
         "resolution": resolution,
         "generate_audio": generate_audio,
         "watermark": watermark,
