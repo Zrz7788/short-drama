@@ -102,10 +102,51 @@ def pick_draft(con, shot_id, pick):
     return dict(r) if r else None
 
 
+def do_select(con, ep, spec):
+    """`--select 2:5,3:4`（镜号:抽号）—— 把"正片用哪条"显式改掉。
+
+    ⚠️ 为什么必须有这个开关：`--mode final` 出了新成片之后**不会自动改选中项**
+    （原逻辑是"没有选中项时才设默认"），于是会出现
+    **"重出了、钱花了、正片里还是旧那条"**——看着像做了，其实没做（实测踩到）。
+    选定是**人的决定**，所以留成显式的一步，但要能一键做。
+    """
+    ok = True
+    for item in spec.replace("，", ",").split(","):
+        if not item.strip():
+            continue
+        seq_s, _, att_s = item.strip().partition(":")
+        if not (seq_s.strip().isdigit() and att_s.strip().isdigit()):
+            print("看不懂的 --select 项：%s（要写 镜号:抽号，如 2:5）" % item)
+            ok = False
+            continue
+        seq, att = int(seq_s), int(att_s)
+        g = con.execute(
+            "SELECT g.id, g.local_path, g.is_draft FROM generation g "
+            "JOIN shot s ON s.id=g.shot_id "
+            "WHERE s.episode_id=? AND s.seq=? AND g.attempt_no=? "
+            "AND g.status='succeeded'", (ep["id"], seq, att)).fetchone()
+        if not g:
+            print("S%02d a%s：找不到成功的生成记录" % (seq, att))
+            ok = False
+            continue
+        if g["is_draft"]:
+            print("S%02d a%s：这是**样片**（480P），不能当交付选中项" % (seq, att))
+            ok = False
+            continue
+        con.execute("UPDATE shot SET selected_generation_id=? "
+                    "WHERE episode_id=? AND seq=?", (g["id"], ep["id"], seq))
+        print("S%02d 交付选中项 → a%s（%s）"
+              % (seq, att, os.path.basename(g["local_path"] or "")))
+    con.commit()
+    return 0 if ok else 2
+
+
 def main():
     ap = argparse.ArgumentParser(description="第 8 阶段：视频生成")
     ap.add_argument("--episode-id", type=int, required=True)
-    ap.add_argument("--mode", choices=("draft", "direct", "final"), required=True)
+    ap.add_argument("--mode", choices=("draft", "direct", "final"), default=None,
+                    help="draft=出样片 / direct=简单镜直出成片 / final=按样片出成片；"
+                         "只在用 --select 改选中项时可以省略")
     ap.add_argument("--only", default=None, help="只处理这些镜号，如 3,4,5")
     ap.add_argument("--attempts", type=int, default=None,
                     help="覆盖该镜的计划抽卡次数（默认取 shot.draws_planned）")
@@ -117,6 +158,10 @@ def main():
     ap.add_argument("--poll-timeout", type=float, default=600)
     ap.add_argument("--poll-interval", type=float, default=8)
     ap.add_argument("--force", action="store_true", help="已有的也重出")
+    ap.add_argument("--select", default=None,
+                    help="改交付选中项（镜号:抽号，可多个，如 2:5,3:4）；"
+                         "不调 API、不花钱。**重出成片后必须显式选定，"
+                         "否则正片里还是旧那条**")
     A.add_ark_args(ap)
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -126,6 +171,8 @@ def main():
     if not ep:
         print("找不到集:", args.episode_id)
         return 2
+    if not args.mode and not args.select:
+        ap.error("要么给 --mode（生成），要么给 --select（改选中项）")
     rep = C.Report("第 8 阶段 · 视频生成（%s）" % args.mode)
     print("集：第 %s 集 项目：%s\n" % (ep["seq"], ep["project"]))
 
@@ -140,6 +187,11 @@ def main():
     if args.only:
         want = {int(x) for x in args.only.split(",") if x.strip().isdigit()}
         shots = [s for s in shots if s["seq"] in want]
+
+    if args.select:
+        code = do_select(con, ep, args.select)
+        con.close()
+        return code
 
     sel = [s for s in shots if s["strategy"] == want_strategy]
     rep.add("按策略筛出镜头（strategy=%s）" % want_strategy, bool(sel),
@@ -416,6 +468,10 @@ def main():
                 % (nbytes / 1048576.0, s["duration_s"], cost, final.get("_elapsed", "?")))
 
     rep.add("本轮实际花费", True, "¥%.2f" % spent)
+    if args.mode == "final" and spent:
+        # 重出成片**不会自动进正片**，这句话必须打出来，否则就是"看着做了"
+        rep.info("⚠️ 新成片不会自动成为正片：确认画面后跑 "
+                 "--select <镜号>:<抽号>（例如 --select 2:5）才会进拼片")
     rep.info("下一步：" + ("人工挑样片，再用 --mode final 出成片"
                           if args.mode == "draft" else
                           "跑第 9 阶段抽帧与衔接"))
