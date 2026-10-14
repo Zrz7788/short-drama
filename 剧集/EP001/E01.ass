@@ -1,0 +1,41 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Microsoft YaHei,72,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,60,60,150,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:13.34,0:00:14.14,Default,,0,0,0,,快到点了。
+Dialogue: 0,0:00:21.94,0:00:25.19,Default,,0,0,0,,别让他们把我送进炉子。
+Dialogue: 0,0:00:26.16,0:00:27.22,Default,,0,0,0,,我没死。
+Dialogue: 0,0:00:27.30,0:00:29.15,Default,,0,0,0,,心跳一百二十，
+Dialogue: 0,0:00:29.23,0:00:31.35,Default,,0,0,0,,你嘴里有塑形器，
+Dialogue: 0,0:00:31.43,0:00:33.02,Default,,0,0,0,,说不了几句。
+Dialogue: 0,0:00:33.87,0:00:36.19,Default,,0,0,0,,给我上塑形器的人，
+Dialogue: 0,0:00:36.27,0:00:38.33,Default,,0,0,0,,不会给我留心跳。
+Dialogue: 0,0:00:38.41,0:00:39.95,Default,,0,0,0,,那你该报警，
+Dialogue: 0,0:00:40.03,0:00:41.32,Default,,0,0,0,,不该等我。
+Dialogue: 0,0:00:42.86,0:00:43.66,Default,,0,0,0,,报过了。
+Dialogue: 0,0:00:43.74,0:00:44.84,Default,,0,0,0,,三年前报的。
+Dialogue: 0,0:00:44.92,0:00:46.57,Default,,0,0,0,,他们把我关在这儿，
+Dialogue: 0,0:00:46.65,0:00:47.45,Default,,0,0,0,,等你来。
+Dialogue: 0,0:00:51.38,0:00:52.88,Default,,0,0,0,,因为你爹等了你十八年。
+Dialogue: 0,0:00:56.38,0:00:57.18,Default,,0,0,0,,我爸死了十八年，
+Dialogue: 0,0:00:57.26,0:00:58.06,Default,,0,0,0,,墓是我立的。
+Dialogue: 0,0:01:00.19,0:01:01.40,Default,,0,0,0,,立墓那天下雨，
+Dialogue: 0,0:01:01.48,0:01:03.56,Default,,0,0,0,,你穿了双大两码的黑球鞋。
+Dialogue: 0,0:01:03.83,0:01:04.63,Default,,0,0,0,,签完字，
+Dialogue: 0,0:01:04.71,0:01:05.72,Default,,0,0,0,,我就进炉子。
+Dialogue: 0,0:01:05.80,0:01:07.32,Default,,0,0,0,,三〇〇的确认书呢？
+Dialogue: 0,0:01:07.40,0:01:08.74,Default,,0,0,0,,入炉前必须补签。
+Dialogue: 0,0:01:09.60,0:01:10.40,Default,,0,0,0,,我没签过。
+Dialogue: 0,0:01:14.97,0:01:16.36,Default,,0,0,0,,三天前签的，
+Dialogue: 0,0:01:16.44,0:01:17.37,Default,,0,0,0,,你送的。
+Dialogue: 0,0:01:17.45,0:01:19.54,Default,,0,0,0,,主管，我没资格签。
+Dialogue: 0,0:01:19.62,0:01:20.78,Default,,0,0,0,,找主任去。

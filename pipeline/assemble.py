@@ -106,6 +106,55 @@ def crop_filter(src_w, src_h, ratio, dur, shot_plan):
     return "%s,scale=%d:%d:flags=lanczos,setsar=1" % (crop, out_w, out_h)
 
 
+def blur_fill_filter(ratio, blur=30, darken=-0.10):
+    """`--fill blur`：**完整画面 + 上下模糊填充**，一点画面都不丢。
+
+    红果这类竖屏平台要求 9:16，而素材是 16:9（横屏生成）。裁切必然丢两侧
+    （用户实测反馈"看不太着"）；等比缩放 + 黑边又太丑。这条路是第三条：
+    背景 = 同一帧放大铺满 + 重模糊 + 压暗，前景 = 完整 16:9 居中。
+
+    代价要写清楚：**观感像"转发件"**，不如原生竖屏正。真正该做的是
+    **下一集起原生 9:16 生成**，这一条是给已有素材的补救。
+    """
+    tw, th = DELIVER_SIZES[ratio]
+    return ("[0:v]split=2[bg][fg];"
+            "[bg]scale=%d:%d:force_original_aspect_ratio=increase,"
+            "crop=%d:%d,gblur=sigma=%d,eq=brightness=%.2f:saturation=0.95[bg2];"
+            "[fg]scale=%d:-2[fg2];"
+            "[bg2][fg2]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
+            % (tw, th, tw, th, blur, darken, tw))
+
+
+def measure_lufs(path):
+    """量成片整体响度（EBU R128 积分值）。量不出来返回 None。
+
+    **归一之后必须再量一次**——`loudnorm` 单遍模式是"边估边调"，
+    它自己说调到 -16 不等于真到 -16。不校验就等于"我以为我做了"。
+    """
+    # ⚠️ `-loglevel info` 必须显式加：`run_ffmpeg` 默认带 `-loglevel error`，
+    # 而 **ebur128 的读数是用 info 级别打出来的**——用默认级别跑，
+    # 输出里根本没有 "I: ... LUFS"，正则匹配不到就返回 None，
+    # 报表上写"nan → nan LUFS"，**看着像"量了"，其实是没量着**（实测踩过）。
+    p = C.run_ffmpeg(["-loglevel", "info", "-i", path,
+                      "-af", "ebur128=peak=true", "-f", "null", "-"], cwd=C.ROOT)
+    txt = (p.stderr or "") + (p.stdout or "")
+    import re as _re
+    vals = _re.findall(r"I:\s*(-?\d+\.\d+)\s*LUFS", txt)
+    return float(vals[-1]) if vals else None
+
+
+def sub_style(out_h):
+    """竖屏短剧的字幕样式：字号/边距按**输出高度**等比给，别用 libass 的默认小字。
+
+    位置贴着下缘的模糊区（blur 填充时画面在中段，字幕落在下黑/模糊带上，
+    **不压脸**），白色带黑描边，任何背景上都读得清。
+    """
+    return ("FontName=Microsoft YaHei,FontSize=%d,PrimaryColour=&H00FFFFFF,"
+            "OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,"
+            "Alignment=2,MarginV=%d"
+            % (max(20, int(out_h * 0.036)), max(24, int(out_h * 0.085))))
+
+
 def main():
     ap = argparse.ArgumentParser(description="拼接成集")
     ap.add_argument("--episode-id", type=int, required=True)
@@ -119,6 +168,13 @@ def main():
                          "默认取项目 aspect_ratio；已就位不裁")
     ap.add_argument("--crop-plan", default=None,
                     help="裁剪方案 JSON（默认 剧集/EP0NN/crop_plan.json）")
+    ap.add_argument("--fill", choices=("crop", "blur", "pad"), default="crop",
+                    help="跨画幅时怎么放：crop=逐镜裁切（默认）；"
+                         "blur=完整画面+上下模糊填充（一点不丢，观感像转发件）；"
+                         "pad=等比缩放+黑边")
+    ap.add_argument("--loudnorm", default=None, metavar="I",
+                    help="响度归一目标（LUFS），如 -16。成片各镜电平差很大时必须做，"
+                         "否则上一镜听不清、下一镜炸耳")
     C.add_common_args(ap)
     args = ap.parse_args()
 
@@ -221,6 +277,10 @@ def main():
     proj_ratio = ep.get("aspect_ratio") or "9:16"
     if ratio and ratio != proj_ratio:
         name += "_" + ratio.replace(":", "")
+    if need_crop and args.fill != "crop":
+        name += "_" + args.fill
+    if args.loudnorm:
+        name += "_ln"
     final_rel = os.path.join(args.out, name + ".mp4")     # 交付目标（可能是 D: 绝对路径）
     # ⚠️ **ffmpeg 只能写工作区**（实测）：写工作区外（D:\dsh-film\...）一律
     # `Error opening output files: Permission denied`——**按进程名拦的，提权也没用**
@@ -284,24 +344,34 @@ def main():
         for c in clips:
             seg = os.path.join(seg_dir, "S%03d.mp4" % c["shot_seq"])
             cmd = ["-i", c["video_path"]]
-            if ratio and need_crop:
-                sg = C.video_signature(c["video_path"], cwd=C.ROOT)
-                vf = crop_filter(int(sg[0]), int(sg[1]), ratio,
-                                 C.duration(c["video_path"], cwd=C.ROOT),
-                                 (plan or {}).get("shots", {}).get(str(c["shot_seq"])))
+            audio_args = (["-c:a", "aac", "-ar", "48000", "-ac", "2"] if keep_audio
+                          else ["-an"])
+            if ratio and need_crop and args.fill == "blur":
+                # 完整画面 + 上下模糊填充：需要一路拆两路，走 filter_complex
+                cmd += ["-filter_complex", blur_fill_filter(ratio),
+                        "-map", "[v]"]
+                cmd += (["-map", "0:a?"] if keep_audio else ["-an"])
             else:
-                vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,"
-                      "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1" % (rw, rh, rw, rh))
-            cmd += ["-vf", vf, "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+                if ratio and need_crop and args.fill == "crop":
+                    sg = C.video_signature(c["video_path"], cwd=C.ROOT)
+                    vf = crop_filter(int(sg[0]), int(sg[1]), ratio,
+                                     C.duration(c["video_path"], cwd=C.ROOT),
+                                     (plan or {}).get("shots", {}).get(str(c["shot_seq"])))
+                else:
+                    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,"
+                          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1" % (rw, rh, rw, rh))
+                cmd += ["-vf", vf]
+                cmd += audio_args
+            cmd += ["-c:v", "libx264", "-crf", "18", "-preset", "medium",
                     "-pix_fmt", "yuv420p"]
-            cmd += (["-c:a", "aac", "-ar", "48000", "-ac", "2"] if keep_audio else ["-an"])
             cmd += [seg]
             rr = C.run_ffmpeg(cmd, cwd=C.ROOT)
             if rr.returncode != 0:
                 bad = "S%02d %s" % (c["shot_seq"], C.tail(rr.stderr, 80))
                 break
             segs.append(seg)
-        rep.add("逐镜归一化（%s）" % ("裁 " + ratio if (ratio and need_crop) else "只统一规格"),
+        rep.add("逐镜归一化（%s）"
+                % (("%s " % args.fill) + ratio if (ratio and need_crop) else "只统一规格"),
                 bad is None, bad or "%d 段" % len(segs))
         if bad is None:
             seg_list = os.path.join(tmp_dir, "concat_%s_seg.txt" % name)
@@ -342,7 +412,14 @@ def main():
         else:
             # 用相对路径 + cwd 调 ffmpeg，绕开 Windows 盘符冒号在滤镜里的转义坑
             srt_rel = os.path.relpath(srt_abs, C.ROOT).replace("\\", "/")
-            r2 = C.run_ffmpeg(["-i", stage_rel, "-vf", "subtitles=%s" % srt_rel,
+            if srt_rel.lower().endswith(".ass"):
+                # ASS 自带 PlayResX/PlayResY 与样式，**不要再 force_style**：
+                # 那会把"真像素"又拉回 libass 的脚本单位（实测字号炸到半屏）。
+                vf = "subtitles=%s" % srt_rel
+            else:
+                _oh = DELIVER_SIZES[ratio][1] if ratio else 1080
+                vf = "subtitles=%s:force_style='%s'" % (srt_rel, sub_style(_oh))
+            r2 = C.run_ffmpeg(["-i", stage_rel, "-vf", vf,
                                "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p"]
                               + (["-c:a", "copy"] if keep_audio else ["-an"])
                               + ["-movflags", "+faststart", burn_rel], cwd=C.ROOT)
@@ -350,6 +427,28 @@ def main():
                     C.tail(r2.stderr) if r2.returncode else burn_rel)
             if r2.returncode == 0:
                 delivered = burn_rel
+
+    # --- 响度归一（只动音频，视频直接 copy）---
+    if args.loudnorm:
+        before = measure_lufs(delivered) if keep_audio else None
+        ln_rel = os.path.join(tmp_dir, "%s_ln.mp4" % name)
+        r3 = C.run_ffmpeg(["-i", delivered, "-c:v", "copy",
+                           "-af", "loudnorm=I=%s:TP=-1.5:LRA=11" % args.loudnorm,
+                           "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
+                          + FASTSTART + [ln_rel], cwd=C.ROOT)
+        if r3.returncode != 0:
+            rep.add("响度归一", False, C.tail(r3.stderr, 90))
+        else:
+            after = measure_lufs(ln_rel)
+            delivered = ln_rel
+            rep.add("响度归一（只动音频）", True,
+                    "%.1f → %.1f LUFS（目标 %s）"
+                    % (before if before is not None else float("nan"),
+                       after if after is not None else float("nan"), args.loudnorm))
+            if after is not None and abs(after - float(args.loudnorm)) > 1.5:
+                rep.info("⚠️ 归一后实测 %0.1f LUFS，与目标差 %.1f；单遍 loudnorm 只估不测，"
+                         "要精确得跑两遍（第一遍拿 measured_* 再喂回去）"
+                         % (after, abs(after - float(args.loudnorm))))
 
     # --- 交付：ffmpeg 只写工作区，跨盘交给 python（见上文 Permission denied 说明）---
     dest = C.abs_path(final_rel)

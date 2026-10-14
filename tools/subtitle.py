@@ -120,6 +120,46 @@ def ts(t):
     return "%02d:%02d:%02d,%03d" % (h, m, int(s), int(round((s - int(s)) * 1000)))
 
 
+def ts_ass(t):
+    """ASS 时间码 H:MM:SS.cc（百分秒）"""
+    if t < 0:
+        t = 0.0
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = t % 60
+    return "%d:%02d:%02d.%02d" % (h, m, int(s), int(round((s - int(s)) * 100)))
+
+
+def write_ass(cues, path, w, h, font="Microsoft YaHei", font_size=72,
+              margin_v=150):
+    r"""写 ASS 而不是靠 SRT + force_style：**字号单位是"脚本单位"，不是像素**。
+
+    ⚠️ 实测踩过：给 SRT 配 `force_style=FontSize=69`，libass 按它自己假定的
+    PlayResY（288）去缩放，渲出来字高占了大半屏——**一行字盖住整张脸**。
+    自己写 ASS 并在 [Script Info] 里把 `PlayResX/PlayResY` 定成交付尺寸，
+    字号/边距才是**真的像素**，不用再猜 libass 的内部常量。
+    """
+    # 描边 3px、阴影 1px、Alignment=2（底部居中）、MarginV=下边距
+    style = ("Style: Default,%s,%d,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+             "-1,0,0,0,100,100,0,0,1,3,1,2,60,60,%d,1"
+             % (font, font_size, margin_v))
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("[Script Info]\nScriptType: v4.00+\n"
+                "PlayResX: %d\nPlayResY: %d\nWrapStyle: 2\n"
+                "ScaledBorderAndShadow: yes\n\n" % (w, h))
+        f.write("[V4+ Styles]\n"
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour,"
+                " OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,"
+                " ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow,"
+                " Alignment, MarginL, MarginR, MarginV, Encoding\n")
+        f.write(style + "\n\n[Events]\n"
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR,"
+                " MarginV, Effect, Text\n")
+        for cs, ce, text in cues:
+            f.write("Dialogue: 0,%s,%s,Default,,0,0,0,,%s\n"
+                    % (ts_ass(cs), ts_ass(ce), text.replace("\n", "\\N")))
+
+
 def main():
     ap = argparse.ArgumentParser(description="按实测说话窗口生成字幕")
     ap.add_argument("--episode-id", type=int, required=True)
@@ -128,6 +168,10 @@ def main():
     ap.add_argument("--max-chars", type=int, default=14, help="每行最多字数")
     ap.add_argument("--min-dur", type=float, default=0.8, help="每块最短秒数")
     ap.add_argument("--gap", type=float, default=0.08, help="块间空隙秒数")
+    ap.add_argument("--play-res", default="1080x1920",
+                    help="ASS 的 PlayResX/PlayResY，**要跟交付尺寸一致**（默认竖屏 1080x1920）")
+    ap.add_argument("--font-size", type=int, default=72, help="ASS 字号（真像素）")
+    ap.add_argument("--margin-v", type=int, default=150, help="距下边缘像素")
     ap.add_argument("--report", action="store_true", help="打印逐镜窗口")
     C.add_common_args(ap)
     args = ap.parse_args()
@@ -221,15 +265,19 @@ def main():
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         for i, (cs, ce, text) in enumerate(cues, start=1):
             f.write("%d\n%s --> %s\n%s\n\n" % (i, ts(cs), ts(ce), text))
+    pw, ph = [int(x) for x in args.play_res.lower().split("x")]
+    ass = os.path.splitext(out)[0] + ".ass"
+    write_ass(cues, ass, pw, ph, font_size=args.font_size, margin_v=args.margin_v)
     print("\n字幕块 %d 条　（实测窗口 %d 镜 / 推定窗口 %d 镜）"
           % (len(cues), n_meas, n_guess))
-    print("已写入 %s" % os.path.relpath(out, C.ROOT))
+    print("已写入 %s（给平台/播放器）\n       %s（**烧录用这个**，字号=真像素）"
+          % (os.path.relpath(out, C.ROOT), os.path.relpath(ass, C.ROOT)))
     if n_guess:
         print("⚠️ 有 %d 镜没检测到人声，用的是**推定**窗口——这些块可能不贴嘴，"
               "上线前请人耳过一遍（脚本只能量到「有没有人在说」，"
               "量不到「说到第几个字」）。" % n_guess)
     print("\n烧进成片：python pipeline/assemble.py --episode-id %d --srt %s --out <目录>"
-          % (ep["seq"], os.path.relpath(out, C.ROOT).replace("\\", "/")))
+          % (ep["seq"], os.path.relpath(ass, C.ROOT).replace("\\", "/")))
     return 0
 
 
