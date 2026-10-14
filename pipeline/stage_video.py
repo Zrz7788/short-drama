@@ -336,11 +336,18 @@ def main():
         url = A.video_url_of(final)
         cost = (s["duration_s"] * m_pps) if m_pps is not None else 0.0
         if status not in ("succeeded", "success") or not url:
-            con.execute("UPDATE generation SET status='failed', error=?, cost=0, "
-                        "finished_at=datetime('now','localtime') WHERE id=?",
-                        ("status=%s 但拿不到 video_url" % status, gid))
+            # ⚠️ 失败任务的计费是盲区：任务真实跑完了（轮询数分钟），Ark 对
+            # "跑完但失败"是否计费无文档。按 0 记账是赌——2026-10-14 对账发现
+            # 账本 ¥110.99 vs 实扣 ¥130+，差额主要在这类记录（3 笔 ≈¥14.7）。
+            # 标 cost_uncertain，对账脚本按此补记，不装作它是零。
+            est = s["duration_s"] * (m_pps or 0)
+            con.execute("UPDATE generation SET status='failed', error=?, "
+                        "cost=0, finished_at=datetime('now','localtime') WHERE id=?",
+                        ("status=%s 但拿不到 video_url；若账单有对应计费，应记 ¥%.2f（cost_uncertain）"
+                         % (status, est), gid))
             con.commit()
-            rep.add(tag, False, "status=%s，无视频地址（原始响应已落盘）" % status)
+            rep.add(tag, False, "status=%s，无视频地址（原始响应已落盘）；"
+                    "若账单有计费应补记 ¥%.2f" % (status, est))
             ok_all = False
             continue
 
