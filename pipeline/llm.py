@@ -62,6 +62,67 @@ def require_config(base_url=None, api_key=None, model=None):
 # 可用 LLM_TIMEOUT 覆盖（秒）。
 DEFAULT_TIMEOUT = int(os.environ.get("LLM_TIMEOUT") or 600)
 
+# ---------------------------------------------------------------- 用量台账
+#
+# ⚠️ 为什么必须记：**文本 LLM 的调用一直没进账本**。
+# 结果就是"项目账本 ¥197，用户看到的账单 ¥400"——**差的钱没人说得清**（实测）。
+# 图片/视频有 `cost_ledger`，文本调用却只进不记，是这套账最大的盲区。
+#
+# 这里只做**收集**（每次 chat 追加一条），由调用方在收尾时
+# `flush_usage(con, episode_id)` 落库——**不在这里直接写库**：
+# 阶段脚本才知道自己在写哪一集，而且自检用的临时库也要能接管。
+USAGE = []
+
+
+def take_usage():
+    """取出并清空本次进程累计的用量。"""
+    global USAGE
+    out, USAGE = USAGE, []
+    return out
+
+
+def price_of(con, model_id, kind):
+    """从 price_book 取单价（元/百万 token）。取不到返回 None。"""
+    try:
+        r = con.execute("SELECT unit_price FROM price_book WHERE model_id=? AND variant=?",
+                        (model_id, kind)).fetchone()
+    except Exception:
+        return None
+    if not r:
+        return None
+    return float(r[0] if not hasattr(r, "keys") else r["unit_price"])
+
+
+def flush_usage(con, episode_id=None, note="LLM"):
+    """把累计用量写进 cost_ledger。
+
+    单价取不到时**照记 token、金额记 0 并在 note 里写明**——
+    宁可记一条「价格未知」，也不要静默丢掉一次花费（「查不到价就记 0」是踩过的坑）。
+    返回 (条数, 合计元)。
+    """
+    rows = take_usage()
+    total, n = 0.0, 0
+    for u in rows:
+        pin = price_of(con, u["model"], "推理输入")
+        pout = price_of(con, u["model"], "推理输出")
+        tin = u.get("prompt_tokens") or 0
+        tout = u.get("completion_tokens") or 0
+        if pin is None or pout is None:
+            amount, tag = 0.0, "（**价格未登记**，仅记 token）"
+        else:
+            amount = tin / 1e6 * pin + tout / 1e6 * pout
+            tag = ""
+        con.execute(
+            "INSERT INTO cost_ledger (category, model_id, quantity, unit, unit_price,"
+            " amount, episode_id, shot_id, note) VALUES ('llm',?,?, 'mtoken',?,?,?,NULL,?)",
+            (u["model"], (tin + tout) / 1e6, (pin or 0.0), amount, episode_id,
+             "%s in=%d out=%d%s" % (note, tin, tout, tag)))
+        total += amount
+        n += 1
+    if n:
+        con.commit()
+    return n, total
+
 
 def chat(messages, base_url=None, api_key=None, model=None,
          temperature=0.7, max_tokens=8192, retries=3, timeout=None):
@@ -85,6 +146,11 @@ def chat(messages, base_url=None, api_key=None, model=None,
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode("utf-8"))
+            # 用量台账：有就记，没有（假服务/精简响应）就记 0，不因此报错
+            u = data.get("usage") or {}
+            USAGE.append({"model": data.get("model") or mdl,
+                          "prompt_tokens": u.get("prompt_tokens") or 0,
+                          "completion_tokens": u.get("completion_tokens") or 0})
             return data["choices"][0]["message"]["content"]
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")[:300]

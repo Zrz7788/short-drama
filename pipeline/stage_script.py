@@ -177,6 +177,13 @@ def main():
     else:
         obj = L.chat_json([{"role": "user", "content": prompt}], SPEC, "剧本",
                           base_url=args.base_url, model=args.model)
+
+        try:
+            _n, _amt = L.flush_usage(con, ep["id"])
+            if _n:
+                rep.info("LLM 用量已记账：%d 次调用 ¥%.2f" % (_n, _amt))
+        except Exception as _e:      # 记账失败不影响本阶段结果
+            rep.info("LLM 记账失败（不影响结果）：%s" % _e)
         rep.info("来源：模型调用")
 
     rep.add("结构校验通过", True, "title/logline/content/scenes")
