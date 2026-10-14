@@ -45,9 +45,11 @@ VARIANT_FINAL = "旗舰"
 # 依据《单集成本模型.md》：「视频抽卡占 91%，一次多余抽卡（4 秒 ≈ ¥5.8）就能吃掉
 # 换成便宜模型省下的全部差价」——难点用贵模型是为了一次过，不是浪费。
 # 注意：Draft 样片档只有 2.5 有价（2.0 无 Draft 价），所以 draft 模式全走 2.5。
+# direct 模式（direct 镜直出成片）也映射 2.0——它同样是"简单镜"。
 MODEL_BY_STRATEGY = {
     ("draft", "draft"): "doubao-seedance-2-5-260628",     # 样片：统一 2.5（只有它有 Draft 价）
     ("final", "draft"): "doubao-seedance-2-5-260628",     # 难镜成片：2.5
+    ("direct", "direct"): "doubao-seedance-2-0-260128",   # 简单镜直出：2.0 省 31%
     ("final", "direct"): "doubao-seedance-2-0-260128",    # 简单镜成片：2.0 省 31%
 }
 
@@ -181,7 +183,6 @@ def main():
     # 生成画幅：16:9 横屏（见文件头 MODEL_BY_STRATEGY 上方的说明）。
     # 项目 aspect_ratio 仍是 9:16——那是**交付画幅**，裁剪在拼片阶段做。
     GEN_RATIO = "16:9"
-    pps = price_of(con, cfg["video_model"], variant)
 
     # ---- 计划与预算 ----
     # --pick 支持多镜：3:2,5:1
