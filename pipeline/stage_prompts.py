@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline import common as C  # noqa: E402
 from pipeline import llm as L  # noqa: E402
+from pipeline import prompt_recipes as R  # noqa: E402
 
 TEMPLATE = os.path.join(C.ROOT, "pipeline", "prompts", "shot_prompt.md")
 
@@ -185,10 +186,22 @@ def build(shot, ents):
     emo = (shot["camera_emotion"] or "").strip()
     base = (shot["camera_move"] or "").strip()
     cam = emo or base or "固定"
+    # 运镜配方句：**只认表内短标签**（推/跟/移/环绕…及其"推镜头"式别名）
+    # 出处：《小蕾知识库分享版》运镜表；已剥掉速度与"从哪到哪"的范围
+    # （见 prompt_recipes.py 里的实测踩坑说明）。分镜已写好的富描述不套，免得写两遍。
+    if R.camera_key(cam):
+        clause = R.camera_clause(cam)
+        if clause:
+            cam = "%s（%s）" % (cam, clause)
     if (shot["movement_speed"] or "").strip():
         cam += "，%s" % shot["movement_speed"].strip()
     if (shot["camera_lock"] or "").strip():
         cam += "，%s" % shot["camera_lock"].strip()
+
+    # 景别配方句（出处同上；**已剥掉"跟随/旋转/颤动"等运动**，
+    # 因为运动归【运镜】和静止锁管，照抄会互相打架）
+    size_clause = R.shot_size_clause(shot["shot_size"])
+    size_clause_line = ("【景别配方】%s" % size_clause) if size_clause else ""
 
     optics = "　".join(x for x in (
         ("焦段 %s" % shot["lens_mm"].strip()) if (shot["lens_mm"] or "").strip() else "",
@@ -197,6 +210,7 @@ def build(shot, ents):
     tpl = L.load_prompt(
         TEMPLATE,
         shot_size=shot["shot_size"],
+        shot_size_clause_line=size_clause_line,
         camera_line=cam,
         optics_line=optics,
         composition=(shot["composition"] or "").strip() or "三分法",
