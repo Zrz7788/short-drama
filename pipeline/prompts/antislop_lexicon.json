@@ -1,0 +1,67 @@
+{
+ "version": "1.0",
+ "source": "manju-laoli-V7.4.20 anti-slop-lexicon + vocab/zh + LearnPrompt anti-slop",
+ "categories": [
+  {
+   "category": "电影感套话",
+   "bad": [
+    "电影感",
+    "氛围感",
+    "高级感",
+    "质感拉满",
+    "电影级画面"
+   ],
+   "good": "用具体的光线、色温、焦段、胶片类型替代（如 'cold grey-blue palette, 35mm film texture, natural window light'）"
+  },
+  {
+   "category": "情绪套话",
+   "bad": [
+    "情绪拉满",
+    "内心挣扎",
+    "复杂眼神",
+    "深沉的目光"
+   ],
+   "good": "用器官级微表情替代（如 'pupil contracts sharply, lips pressed, fingertip trembling'）"
+  },
+  {
+   "category": "动作套话",
+   "bad": [
+    "激烈交战",
+    "快速移动",
+    "精准打击",
+    "华丽招式"
+   ],
+   "good": "用发力链替代（如 'plants foot, rotates hip, drives shoulder, strikes with palm heel'）"
+  },
+  {
+   "category": "文字套话",
+   "bad": [
+    "字幕浮现",
+    "文字飞入",
+    "标题动画"
+   ],
+   "good": "用道具载体替代（如 'text printed on document lying flat on desk'）"
+  },
+  {
+   "category": "人物套话",
+   "bad": [
+    "美丽女子",
+    "帅气男人",
+    "气质出众"
+   ],
+   "good": "用可辨识特征替代（如 '28yo Chinese woman, black low ponytail, charcoal work jacket, grey apron'）"
+  },
+  {
+   "category": "特效套话",
+   "bad": [
+    "粒子特效",
+    "能量光效",
+    "魔法阵",
+    "光柱"
+   ],
+   "good": "用物理效果替代（如 'steam rising from hot surface, metal heat discoloration'）"
+  }
+ ],
+ "auto_replace": false,
+ "usage": "prompt_review 时逐条对照，命中的 bad 词用 good 列的思路改写"
+}

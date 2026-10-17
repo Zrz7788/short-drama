@@ -1,0 +1,48 @@
+{
+ "version": "1.0",
+ "source": "manju-laoli-V7.4.20 C27 + 用户实测数据",
+ "rules": [
+  {
+   "id": "C27-b",
+   "name": "台词密度",
+   "check": "total_dialogue_chars / total_duration_seconds",
+   "threshold": "< 2.0 字/秒",
+   "action": "超标则砍台词或转画面传达"
+  },
+  {
+   "id": "C27-c",
+   "name": "开口次数",
+   "check": "dialogue_count / (duration / 15)",
+   "threshold": "3 ~ 6 次/15秒",
+   "action": "低于3=节奏拖沓；高于6=观众来不及听"
+  },
+  {
+   "id": "C27-d",
+   "name": "站桩式对话",
+   "check": "同一说话人连续 ≥2 镜独占开口",
+   "threshold": "禁止",
+   "action": "中间插反应镜（对方表情/手部/环境）"
+  },
+  {
+   "id": "C28-a",
+   "name": "书面虚词",
+   "check": "台词中含 '是否'/'因此'/'鉴于'",
+   "threshold": "禁止",
+   "action": "改为口语化表达"
+  },
+  {
+   "id": "C28-b",
+   "name": "长台词无语气词",
+   "check": "台词 ≥40 字且语气词（吗呢啊吧呀哦嗯哎）为 0",
+   "threshold": "禁止",
+   "action": "加语气词或拆句"
+  },
+  {
+   "id": "C28-c",
+   "name": "长句无停顿",
+   "check": "单句 ≥20 字无逗号/顿号/分号",
+   "threshold": "禁止",
+   "action": "加停顿标点或拆句"
+  }
+ ]
+}
